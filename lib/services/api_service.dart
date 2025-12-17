@@ -9,14 +9,20 @@ import '../models/job_seeker.dart';
 import '../models/bakery_ad.dart';
 import '../models/equipment_ad.dart';
 import 'media_compressor.dart';
+import 'cache_service.dart';
+import 'encryption_service.dart';
 
 class ApiService {
   // برای تست روی امولاتور اندروید از 10.0.2.2 استفاده کن
   // برای دستگاه واقعی از IP کامپیوترت استفاده کن
   static const String baseUrl = 'http://10.0.2.2:3000/api';
+  static const Duration _timeout = Duration(seconds: 5);
   
   static String? _token;
   static int? _currentUserId;
+  
+  // Callback برای نمایش پیام آفلاین
+  static Function(String)? onServerUnavailable;
 
   // ==================== Auth ====================
   
@@ -73,6 +79,8 @@ class ApiService {
           _currentUserId = data['user']['id'];
           final prefs = await SharedPreferences.getInstance();
           await prefs.setInt('user_id', _currentUserId!);
+          // تنظیم userId برای رمزنگاری
+          EncryptionService.setMyUserId(_currentUserId!);
         }
       }
       return data;
@@ -86,6 +94,10 @@ class ApiService {
     if (_currentUserId != null) return _currentUserId;
     final prefs = await SharedPreferences.getInstance();
     _currentUserId = prefs.getInt('user_id');
+    // تنظیم userId برای رمزنگاری
+    if (_currentUserId != null) {
+      EncryptionService.setMyUserId(_currentUserId!);
+    }
     return _currentUserId;
   }
 
@@ -137,7 +149,11 @@ class ApiService {
     int? maxSalary,
     String? search,
     int page = 1,
+    bool useCache = true,
   }) async {
+    // اگه صفحه اول و بدون فیلتر بود، از کش استفاده کن
+    final canUseCache = useCache && page == 1 && category == null && location == null && search == null;
+    
     try {
       final params = <String, String>{
         'page': page.toString(),
@@ -149,15 +165,30 @@ class ApiService {
       };
       
       final uri = Uri.parse('$baseUrl/job-ads').replace(queryParameters: params);
-      final response = await http.get(uri);
+      final response = await http.get(uri).timeout(_timeout);
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return (data['data'] as List).map((json) => JobAd.fromJson(json)).toList();
+        final list = data['data'] as List;
+        // کش کردن نتایج
+        if (canUseCache) {
+          await CacheService.cacheJobAds(List<Map<String, dynamic>>.from(list));
+        }
+        return list.map((json) => JobAd.fromJson(json)).toList();
       }
       return [];
     } catch (e) {
-      print('Error fetching job ads: $e');
+      debugPrint('Error fetching job ads: $e');
+      // در صورت خطا، از کش استفاده کن
+      if (canUseCache) {
+        final cached = await CacheService.getJobAds();
+        if (cached != null) {
+          debugPrint('📦 Using cached job ads');
+          onServerUnavailable?.call('سرور در دسترس نیست - نمایش از حافظه');
+          return cached.map((json) => JobAd.fromJson(json)).toList();
+        }
+      }
+      onServerUnavailable?.call('سرور در دسترس نیست');
       return [];
     }
   }
@@ -236,7 +267,10 @@ class ApiService {
     int? maxSalary,
     String? search,
     int page = 1,
+    bool useCache = true,
   }) async {
+    final canUseCache = useCache && page == 1 && location == null && search == null;
+    
     try {
       final params = <String, String>{
         'page': page.toString(),
@@ -246,14 +280,27 @@ class ApiService {
       };
       
       final uri = Uri.parse('$baseUrl/job-seekers').replace(queryParameters: params);
-      final response = await http.get(uri);
+      final response = await http.get(uri).timeout(_timeout);
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return (data['data'] as List).map((json) => JobSeeker.fromJson(json)).toList();
+        final list = data['data'] as List;
+        if (canUseCache) {
+          await CacheService.cacheJobSeekers(List<Map<String, dynamic>>.from(list));
+        }
+        return list.map((json) => JobSeeker.fromJson(json)).toList();
       }
       return [];
     } catch (e) {
+      if (canUseCache) {
+        final cached = await CacheService.getJobSeekers();
+        if (cached != null) {
+          debugPrint('📦 Using cached job seekers');
+          onServerUnavailable?.call('سرور در دسترس نیست - نمایش از حافظه');
+          return cached.map((json) => JobSeeker.fromJson(json)).toList();
+        }
+      }
+      onServerUnavailable?.call('سرور در دسترس نیست');
       return [];
     }
   }
@@ -333,7 +380,10 @@ class ApiService {
     int? minFlourQuota,
     int? maxFlourQuota,
     int page = 1,
+    bool useCache = true,
   }) async {
+    final canUseCache = useCache && page == 1 && type == null && location == null && search == null;
+    
     try {
       final params = <String, String>{
         'page': page.toString(),
@@ -348,19 +398,26 @@ class ApiService {
       };
       
       final uri = Uri.parse('$baseUrl/bakery-ads').replace(queryParameters: params);
-      debugPrint('📥 Fetching bakery ads from: $uri');
       final response = await http.get(uri);
-      debugPrint('📥 Bakery ads response: ${response.body}');
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        final ads = (data['data'] as List).map((json) => BakeryAd.fromJson(json)).toList();
-        debugPrint('📥 Parsed ${ads.length} bakery ads');
-        return ads;
+        final list = data['data'] as List;
+        if (canUseCache) {
+          await CacheService.cacheBakeries(List<Map<String, dynamic>>.from(list));
+        }
+        return list.map((json) => BakeryAd.fromJson(json)).toList();
       }
       return [];
     } catch (e) {
       debugPrint('❌ Error fetching bakery ads: $e');
+      if (canUseCache) {
+        final cached = await CacheService.getBakeries();
+        if (cached != null) {
+          debugPrint('📦 Using cached bakeries');
+          return cached.map((json) => BakeryAd.fromJson(json)).toList();
+        }
+      }
       return [];
     }
   }
@@ -421,7 +478,10 @@ class ApiService {
     String? location,
     String? search,
     int page = 1,
+    bool useCache = true,
   }) async {
+    final canUseCache = useCache && page == 1 && condition == null && location == null && search == null;
+    
     try {
       final params = <String, String>{
         'page': page.toString(),
@@ -435,10 +495,21 @@ class ApiService {
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return List<Map<String, dynamic>>.from(data['data']);
+        final list = List<Map<String, dynamic>>.from(data['data']);
+        if (canUseCache) {
+          await CacheService.cacheEquipment(list);
+        }
+        return list;
       }
       return [];
     } catch (e) {
+      if (canUseCache) {
+        final cached = await CacheService.getEquipment();
+        if (cached != null) {
+          debugPrint('📦 Using cached equipment');
+          return cached;
+        }
+      }
       return [];
     }
   }
@@ -706,29 +777,64 @@ class ApiService {
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return List<Map<String, dynamic>>.from(data['data']);
+        final messages = List<Map<String, dynamic>>.from(data['data']);
+        // رمزگشایی پیام‌ها - کلید بر اساس recipientId ساخته شده
+        for (var msg in messages) {
+          if (msg['message'] != null && msg['isEncrypted'] == true) {
+            try {
+              msg['message'] = await EncryptionService.decryptMessage(msg['message'], recipientId);
+              debugPrint('🔓 Message decrypted successfully');
+            } catch (e) {
+              debugPrint('⚠️ Decryption failed: $e');
+            }
+          }
+        }
+        return messages;
       }
       return [];
     } catch (e) {
+      debugPrint('❌ Get messages error: $e');
       return [];
     }
   }
 
-  static Future<bool> sendMessage(int receiverId, String message, {int? replyToId}) async {
+  static Future<bool> sendMessage(int receiverId, String message, {int? replyToId, bool encrypt = true}) async {
     await _loadToken();
     try {
+      // رمزنگاری پیام
+      String finalMessage = message;
+      bool isEncrypted = false;
+      
+      if (encrypt) {
+        try {
+          finalMessage = await EncryptionService.encryptMessage(message, receiverId);
+          isEncrypted = true;
+          debugPrint('🔐 Message encrypted successfully');
+        } catch (e) {
+          debugPrint('⚠️ Encryption failed, sending plain text: $e');
+          finalMessage = message;
+          isEncrypted = false;
+        }
+      }
+      
+      debugPrint('📨 Sending message to $receiverId (encrypted: $isEncrypted)');
+      
       final response = await http.post(
         Uri.parse('$baseUrl/chat/send'),
         headers: _headers,
         body: jsonEncode({
           'receiverId': receiverId,
-          'message': message,
+          'message': finalMessage,
+          'isEncrypted': isEncrypted,
           if (replyToId != null) 'replyToId': replyToId,
         }),
       );
+      
+      debugPrint('📨 Response: ${response.body}');
       final data = jsonDecode(response.body);
       return data['success'] == true;
     } catch (e) {
+      debugPrint('❌ Send message error: $e');
       return false;
     }
   }
@@ -737,6 +843,8 @@ class ApiService {
   static Future<Map<String, dynamic>?> sendChatMedia(int receiverId, File file, String messageType, {int? replyToId}) async {
     await _loadToken();
     try {
+      debugPrint('📤 sendChatMedia: receiverId=$receiverId, type=$messageType, path=${file.path}');
+      
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/chat/send-media'));
       request.headers['Authorization'] = 'Bearer $_token';
       request.fields['receiverId'] = receiverId.toString();
@@ -744,15 +852,22 @@ class ApiService {
       if (replyToId != null) request.fields['replyToId'] = replyToId.toString();
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       
+      debugPrint('📤 Sending request...');
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
+      debugPrint('📤 Response status: ${response.statusCode}');
+      debugPrint('📤 Response body: ${response.body}');
+      
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
+        debugPrint('✅ Media sent successfully');
         return data['data'];
       }
+      debugPrint('❌ Media send failed: ${data['message']}');
       return null;
     } catch (e) {
+      debugPrint('❌ sendChatMedia error: $e');
       return null;
     }
   }

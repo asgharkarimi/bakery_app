@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../services/unread_messages_service.dart';
 import '../job_ads/job_ads_list_screen.dart';
 import '../job_seekers/job_seekers_list_screen.dart';
 import '../marketplace/marketplace_screen.dart';
@@ -34,10 +35,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
+    // بارگذاری تعداد پیام‌های خوانده نشده
+    UnreadMessagesService().loadUnreadCount();
+    UnreadMessagesService().addListener(_onUnreadCountChanged);
+  }
+
+  void _onUnreadCountChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    UnreadMessagesService().removeListener(_onUnreadCountChanged);
     _pageController.dispose();
     _fabAnimationController.dispose();
     super.dispose();
@@ -97,17 +106,47 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   BottomNavigationBarItem _buildNavItem(IconData icon, IconData activeIcon, String label, int index) {
+    final unreadCount = UnreadMessagesService().unreadCount;
+    final showBadge = index == 3 && unreadCount > 0;
+    
     return BottomNavigationBarItem(
-      icon: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: EdgeInsets.all(_selectedIndex == index ? 8 : 4),
-        decoration: BoxDecoration(
-          color: _selectedIndex == index 
-              ? AppTheme.primaryGreen.withValues(alpha: 0.1) 
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Icon(_selectedIndex == index ? activeIcon : icon),
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: EdgeInsets.all(_selectedIndex == index ? 8 : 4),
+            decoration: BoxDecoration(
+              color: _selectedIndex == index 
+                  ? AppTheme.primaryGreen.withValues(alpha: 0.1) 
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(_selectedIndex == index ? activeIcon : icon),
+          ),
+          if (showBadge)
+            Positioned(
+              right: -2,
+              top: -2,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+        ],
       ),
       label: label,
     );

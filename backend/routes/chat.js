@@ -19,9 +19,10 @@ const upload = multer({
   storage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
   fileFilter: (req, file, cb) => {
-    const allowed = /jpeg|jpg|png|gif|mp4|mov|avi|mp3|wav|ogg|m4a/;
+    const allowed = /jpeg|jpg|png|gif|mp4|mov|avi|mp3|wav|ogg|m4a|aac|webm|3gp/;
     const ext = allowed.test(path.extname(file.originalname).toLowerCase());
     const mime = allowed.test(file.mimetype);
+    console.log('📎 File filter:', file.originalname, file.mimetype, 'ext:', ext, 'mime:', mime);
     cb(null, ext || mime);
   }
 });
@@ -230,7 +231,7 @@ router.get('/messages/:recipientId', auth, async (req, res) => {
 router.post('/send', auth, async (req, res) => {
   try {
     console.log('📨 ارسال پیام:', req.body, 'از کاربر:', req.userId);
-    const { receiverId, message, replyToId } = req.body;
+    const { receiverId, message, replyToId, isEncrypted } = req.body;
 
     const isBlocked = await BlockedUser.findOne({
       where: {
@@ -247,12 +248,26 @@ router.post('/send', auth, async (req, res) => {
       receiverId,
       message,
       messageType: 'text',
-      replyToId
+      replyToId,
+      isEncrypted: isEncrypted || false
     });
 
     const fullChat = await Chat.findByPk(chat.id, {
       include: [{ model: Chat, as: 'replyTo', attributes: ['id', 'message', 'senderId', 'messageType'] }]
     });
+
+    // ارسال پیام از طریق WebSocket
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const receiverSocket = onlineUsers.get(Number(receiverId));
+    
+    if (receiverSocket && io) {
+      io.to(receiverSocket).emit('newMessage', {
+        ...fullChat.toJSON(),
+        senderId: req.userId
+      });
+      console.log('🔌 پیام از طریق WebSocket ارسال شد');
+    }
 
     console.log('✅ پیام ارسال شد:', fullChat.id);
     res.status(201).json({ success: true, data: fullChat });

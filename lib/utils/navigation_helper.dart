@@ -48,7 +48,7 @@ class Nav {
     Navigator.pop(context, result);
   }
 
-  /// برگشت به صفحه اصلی
+  /// برگشت به صفحه اصلی.
   static void toHome(BuildContext context, Widget home) {
     Navigator.pushAndRemoveUntil(
       context,

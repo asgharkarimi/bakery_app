@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -31,6 +32,8 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
   List<String> _selectedSkills = [];
   String _salaryWords = '';
   File? _profileImage;
+  String? _existingProfileImage; // عکس پروفایل از قبل
+  String? _userPhone; // شماره تلفن کاربر
   final ImagePicker _picker = ImagePicker();
   String? _selectedProvince;
   bool _isLoading = false;
@@ -42,6 +45,37 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
     super.initState();
     if (_isEditMode) {
       _populateFields();
+    } else {
+      _loadUserProfile();
+    }
+  }
+  
+  /// بارگذاری اطلاعات پروفایل کاربر برای پر کردن فیلدها
+  Future<void> _loadUserProfile() async {
+    try {
+      final user = await ApiService.getCurrentUser();
+      if (user != null && mounted) {
+        setState(() {
+          // پر کردن نام و نام خانوادگی
+          if (user['name'] != null && user['name'].toString().isNotEmpty) {
+            final nameParts = user['name'].toString().split(' ');
+            _firstNameController.text = nameParts.isNotEmpty ? nameParts.first : '';
+            _lastNameController.text = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+          }
+          
+          // پر کردن عکس پروفایل (اگه داره)
+          if (user['profileImage'] != null && user['profileImage'].toString().isNotEmpty) {
+            _existingProfileImage = user['profileImage'].toString();
+          }
+          
+          // پر کردن شماره تلفن (فقط نمایش)
+          if (user['phone'] != null) {
+            _userPhone = user['phone'].toString();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user profile: $e');
     }
   }
   
@@ -183,8 +217,10 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
                       backgroundColor: AppTheme.background,
                       backgroundImage: _profileImage != null
                           ? FileImage(_profileImage!)
-                          : null,
-                      child: _profileImage == null
+                          : _existingProfileImage != null
+                              ? NetworkImage('http://10.0.2.2:3000$_existingProfileImage')
+                              : null,
+                      child: _profileImage == null && _existingProfileImage == null
                           ? Icon(
                               Icons.person,
                               size: 60,
@@ -198,7 +234,7 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
                       child: GestureDetector(
                         onTap: _pickImage,
                         child: Container(
-                          padding: EdgeInsets.all(8),
+                          padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                             color: AppTheme.primaryGreen,
                             shape: BoxShape.circle,
@@ -214,6 +250,18 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
                   ],
                 ),
               ),
+              // نمایش شماره تلفن کاربر
+              if (_userPhone != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _userPhone!,
+                  style: TextStyle(
+                    color: AppTheme.textGrey,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
               SizedBox(height: 24),
               TextFormField(
                 controller: _firstNameController,

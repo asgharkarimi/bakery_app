@@ -40,6 +40,11 @@ const Chat = sequelize.define('Chat', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
     field: 'is_read'
+  },
+  isEncrypted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_encrypted'
   }
 }, {
   tableName: 'chats',

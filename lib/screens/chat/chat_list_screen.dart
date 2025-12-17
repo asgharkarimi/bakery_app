@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/unread_messages_service.dart';
+import '../../services/encryption_service.dart';
 import '../../widgets/shimmer_loading.dart';
 import 'chat_screen.dart';
 
@@ -25,15 +27,51 @@ class _ChatListScreenState extends State<ChatListScreen> {
     setState(() => _isLoading = true);
     try {
       final conversations = await ApiService.getConversations();
+      
+      // دکریپت کردن پیام‌ها
+      for (final conv in conversations) {
+        final message = conv['message'];
+        final userId = conv['user']?['id'];
+        
+        // اگه پیام رمزشده باشه یا شبیه Base64 باشه، دکریپت کن
+        if (message != null && userId != null) {
+          final isEncrypted = conv['isEncrypted'] == true || 
+              conv['isEncrypted'] == 1 ||
+              _looksLikeEncrypted(message);
+          
+          if (isEncrypted) {
+            try {
+              conv['message'] = await EncryptionService.decryptMessage(
+                message,
+                userId is int ? userId : int.parse(userId.toString()),
+              );
+            } catch (e) {
+              // اگه دکریپت نشد، همون پیام اصلی رو نشون بده
+              debugPrint('❌ Decrypt failed: $e');
+            }
+          }
+        }
+      }
+      
       if (mounted) {
         setState(() {
           _conversations = conversations;
           _isLoading = false;
         });
+        // بروزرسانی تعداد پیام‌های خوانده نشده
+        UnreadMessagesService().loadUnreadCount();
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  // چک کردن اینکه پیام شبیه رمزشده هست یا نه
+  bool _looksLikeEncrypted(String message) {
+    // اگه پیام فقط شامل کاراکترهای Base64 باشه و با = تموم بشه
+    if (message.isEmpty) return false;
+    final base64Pattern = RegExp(r'^[A-Za-z0-9+/]+=*$');
+    return base64Pattern.hasMatch(message) && message.length > 10;
   }
 
   String _formatTime(String? dateStr) {

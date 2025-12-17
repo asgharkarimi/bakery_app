@@ -43,6 +43,10 @@ dependencies:
   path_provider: ^2.1.2
   http_parser: ^4.0.2
   video_compress: ^3.1.2
+  socket_io_client: ^2.0.3+1
+  audio_waveforms: ^1.0.5
+  permission_handler: ^11.3.1
+  path: ^1.9.0
 
 dev_dependencies:
   flutter_test:

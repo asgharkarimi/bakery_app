@@ -3,9 +3,16 @@ import 'dart:async';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart' as ap;
+import 'package:audio_waveforms/audio_waveforms.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:permission_handler/permission_handler.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
+import '../../services/socket_service.dart';
+import '../../services/encryption_service.dart';
+import '../../services/notification_manager.dart';
 
 class ChatScreen extends StatefulWidget {
   final String recipientId;
@@ -27,13 +34,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final ap.AudioPlayer _audioPlayer = ap.AudioPlayer();
+  late RecorderController _recorderController;
   
   List<Map<String, dynamic>> _messages = [];
   bool _isLoading = true;
   bool _isTyping = false;
   bool _isBlocked = false;
   bool _isOnline = false;
+  bool _isRecording = false;
+  String? _recordingPath;
+  Duration _recordingDuration = Duration.zero;
+  Timer? _recordingTimer;
   String? _lastSeen;
   Timer? _refreshTimer;
   Timer? _typingTimer;
@@ -45,6 +57,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // جلوگیری از نمایش اعلان در این چت
+    NotificationManager.setCurrentChat(widget.recipientId);
+    _recorderController = RecorderController();
     _init();
   }
 
@@ -60,12 +75,53 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _init() async {
     _myUserId = await ApiService.getCurrentUserId();
     ApiService.setOnline();
+    
+    // اتصال به WebSocket
+    if (_myUserId != null) {
+      SocketService.connect(_myUserId!);
+      SocketService.onNewMessage = _onNewMessageReceived;
+      SocketService.onUserTyping = _onUserTypingReceived;
+    }
+    
     await _loadUserInfo();
     await _loadMessages();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+    
+    // فقط برای بکاپ، هر 10 ثانیه چک کن
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       _loadMessages(showLoading: false);
-      _checkTyping();
     });
+  }
+  
+  void _onNewMessageReceived(Map<String, dynamic> message) async {
+    final senderId = message['senderId']?.toString();
+    if (senderId == widget.recipientId && mounted) {
+      // رمزگشایی پیام اگه رمزشده باشه
+      if (message['isEncrypted'] == true && message['message'] != null) {
+        try {
+          final decrypted = await EncryptionService.decryptMessage(
+            message['message'],
+            int.parse(widget.recipientId),
+          );
+          message['message'] = decrypted;
+        } catch (e) {
+          debugPrint('❌ WebSocket decrypt error: $e');
+        }
+      }
+      
+      setState(() {
+        _messages.add(message);
+      });
+      _scrollToBottom();
+    }
+  }
+  
+  void _onUserTypingReceived(int senderId) {
+    if (senderId.toString() == widget.recipientId && mounted) {
+      setState(() => _isTyping = true);
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _isTyping = false);
+      });
+    }
   }
 
   Future<void> _loadUserInfo() async {
@@ -128,6 +184,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
 
+    // ذخیره replyToId قبل از پاک کردن
+    final replyToId = _replyTo?['id'];
+
     setState(() {
       _messages.add({
         'id': DateTime.now().millisecondsSinceEpoch,
@@ -144,7 +203,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final success = await ApiService.sendMessage(
       recipientIdInt,
       message,
-      replyToId: _replyTo?['id'],
+      replyToId: replyToId,
     );
     debugPrint('📨 Send result: $success');
     if (!success && mounted) {
@@ -166,6 +225,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sendMedia(File file, String type) async {
+    debugPrint('📤 Sending media: type=$type, path=${file.path}');
+    
+    // چک کردن وجود فایل
+    if (!await file.exists()) {
+      debugPrint('❌ File does not exist: ${file.path}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فایل یافت نشد'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+    
+    final fileSize = await file.length();
+    debugPrint('📤 File size: $fileSize bytes');
+    
     setState(() {
       _messages.add({
         'id': DateTime.now().millisecondsSinceEpoch,
@@ -178,15 +253,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
     _scrollToBottom();
 
+    debugPrint('📤 Calling ApiService.sendChatMedia...');
     final result = await ApiService.sendChatMedia(
       int.parse(widget.recipientId),
       file,
       type,
       replyToId: _replyTo?['id'],
     );
+    debugPrint('📤 Result: $result');
+    
     if (result == null && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('خطا در ارسال فایل'), backgroundColor: Colors.red),
+      );
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('فایل ارسال شد'), backgroundColor: Colors.green),
       );
     }
     setState(() => _replyTo = null);
@@ -263,14 +345,128 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    // اجازه نمایش اعلان دوباره
+    NotificationManager.setCurrentChat(null);
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _typingTimer?.cancel();
+    _recordingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     _audioPlayer.dispose();
+    _recorderController.dispose();
     ApiService.setOffline();
     super.dispose();
+  }
+
+  // شروع ضبط صدا
+  Future<void> _startRecording() async {
+    try {
+      // چک کردن و درخواست permission
+      final status = await Permission.microphone.request();
+      if (!status.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('دسترسی به میکروفون داده نشده'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+      
+      final dir = await getTemporaryDirectory();
+      final path = p.join(dir.path, 'voice_${DateTime.now().millisecondsSinceEpoch}.aac');
+      
+      debugPrint('🎤 Starting recording at: $path');
+      await _recorderController.record(path: path);
+      
+      setState(() {
+        _isRecording = true;
+        _recordingPath = path;
+        _recordingDuration = Duration.zero;
+      });
+      
+      // تایمر برای نمایش مدت زمان ضبط
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            _recordingDuration += const Duration(seconds: 1);
+          });
+        }
+      });
+      
+      debugPrint('🎤 Recording started');
+    } catch (e) {
+      debugPrint('❌ Recording error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطا در ضبط صدا: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // توقف ضبط و ارسال
+  Future<void> _stopRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      debugPrint('🎤 Stopping recording...');
+      final path = await _recorderController.stop();
+      debugPrint('🎤 Recording stopped, path: $path');
+      
+      setState(() => _isRecording = false);
+      
+      if (path != null && path.isNotEmpty) {
+        final file = File(path);
+        if (await file.exists()) {
+          final size = await file.length();
+          debugPrint('🎤 Voice file size: $size bytes');
+          if (size > 0) {
+            await _sendMedia(file, 'voice');
+          } else {
+            debugPrint('❌ Voice file is empty');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('فایل صوتی خالی است'), backgroundColor: Colors.red),
+              );
+            }
+          }
+        } else {
+          debugPrint('❌ Voice file does not exist');
+        }
+      } else {
+        debugPrint('❌ No path returned from recorder');
+      }
+    } catch (e) {
+      debugPrint('❌ Stop recording error: $e');
+      setState(() => _isRecording = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('خطا در ارسال صدا: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // لغو ضبط
+  void _cancelRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      await _recorderController.stop();
+      setState(() {
+        _isRecording = false;
+        _recordingPath = null;
+        _recordingDuration = Duration.zero;
+      });
+    } catch (e) {
+      debugPrint('❌ Cancel recording error: $e');
+      setState(() => _isRecording = false);
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
 
@@ -440,6 +636,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildReplyBubble(Map<String, dynamic> reply, bool isMe) {
+    final message = reply['message'] ?? '';
+    final messageType = reply['messageType'] ?? 'text';
+    
     return Container(
       margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
       padding: const EdgeInsets.all(8),
@@ -448,13 +647,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         borderRadius: BorderRadius.circular(8),
         border: Border(right: BorderSide(color: isMe ? Colors.white : AppTheme.primaryGreen, width: 3)),
       ),
-      child: Text(
-        reply['message'] ?? '[${reply['messageType']}]',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
-      ),
+      child: messageType == 'text' && message.isNotEmpty
+          ? FutureBuilder<String>(
+              future: _decryptIfNeeded(message),
+              builder: (context, snapshot) {
+                return Text(
+                  snapshot.data ?? message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
+                );
+              },
+            )
+          : Text(
+              message.isNotEmpty ? message : '[$messageType]',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
+            ),
     );
+  }
+
+  // چک کردن و رمزگشایی متن اگه لازم باشه
+  Future<String> _decryptIfNeeded(String text) async {
+    if (text.isEmpty) return text;
+    // چک کردن اینکه متن شبیه Base64 رمزشده هست
+    final base64Pattern = RegExp(r'^[A-Za-z0-9+/=]+$');
+    if (text.length > 5 && base64Pattern.hasMatch(text) && (text.endsWith('=') || text.contains('/'))) {
+      try {
+        final decrypted = await EncryptionService.decryptMessage(text, int.parse(widget.recipientId));
+        return decrypted;
+      } catch (e) {
+        return text;
+      }
+    }
+    return text;
   }
 
   Widget _buildMessageContent(Map<String, dynamic> message, String type, bool isMe) {
@@ -464,19 +691,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     switch (type) {
       case 'image':
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: isLocal
-              ? Image.file(File(mediaUrl), width: 200, fit: BoxFit.cover)
-              : Image.network(fullUrl, width: 200, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
+        return GestureDetector(
+          onTap: () => _showFullImage(fullUrl, isLocal),
+          child: Hero(
+            tag: 'image_$mediaUrl',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: isLocal
+                  ? Image.file(File(mediaUrl), width: 200, fit: BoxFit.cover)
+                  : Image.network(fullUrl, width: 200, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
+            ),
+          ),
         );
       case 'video':
         return _buildVideoPlayer(isLocal ? mediaUrl : fullUrl, isLocal);
       case 'voice':
-        return _buildVoicePlayer(isLocal ? mediaUrl : fullUrl, isMe);
+        return _VoiceMessagePlayer(url: fullUrl, isMe: isMe, isLocal: isLocal);
       default:
         return Text(message['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : AppTheme.textDark, fontSize: 15));
     }
+  }
+
+  void _showFullImage(String url, bool isLocal) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FullImageScreen(url: url, isLocal: isLocal),
+      ),
+    );
   }
 
   Widget _buildVideoPlayer(String url, bool isLocal) {
@@ -486,7 +728,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         width: 200,
         height: 150,
         decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
-        child: const Center(child: Icon(Icons.play_circle_fill, color: Colors.white, size: 50)),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+            Positioned(
+              bottom: 8,
+              right: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.videocam, color: Colors.white, size: 14),
+                    SizedBox(width: 4),
+                    Text('ویدیو', style: TextStyle(color: Colors.white, fontSize: 10)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -496,19 +762,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => VideoPlayerScreen(url: url, isLocal: isLocal)),
-    );
-  }
-
-  Widget _buildVoicePlayer(String url, bool isMe) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton(
-          icon: Icon(Icons.play_arrow, color: isMe ? Colors.white : AppTheme.primaryGreen),
-          onPressed: () => _audioPlayer.play(UrlSource(url)),
-        ),
-        Container(width: 100, height: 30, decoration: BoxDecoration(color: isMe ? Colors.white24 : Colors.grey.shade300, borderRadius: BorderRadius.circular(15))),
-      ],
     );
   }
 
@@ -569,11 +822,68 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildInputArea() {
+    // حالت ضبط صدا
+    if (_isRecording) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.red.shade50,
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              // دکمه لغو
+              IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: _cancelRecording,
+              ),
+              // نمایش مدت زمان ضبط
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 12,
+                      height: 12,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _formatDuration(_recordingDuration),
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text('در حال ضبط...', style: TextStyle(color: Colors.red)),
+                  ],
+                ),
+              ),
+              // دکمه ارسال
+              Container(
+                decoration: const BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.send, color: Colors.white),
+                  onPressed: _stopRecording,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // حالت عادی
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
       ),
       child: SafeArea(
         child: Row(
@@ -596,6 +906,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 maxLines: null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _sendMessage(),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // دکمه ضبط صدا
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.orange.shade400,
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.mic, color: Colors.white),
+                onPressed: _startRecording,
               ),
             ),
             const SizedBox(width: 8),
@@ -742,6 +1064,179 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                   )
                 : const CircularProgressIndicator(color: Colors.white),
       ),
+    );
+  }
+}
+
+// صفحه نمایش عکس بزرگ
+class FullImageScreen extends StatelessWidget {
+  final String url;
+  final bool isLocal;
+  
+  const FullImageScreen({super.key, required this.url, required this.isLocal});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          minScale: 0.5,
+          maxScale: 4.0,
+          child: Hero(
+            tag: 'image_$url',
+            child: isLocal
+                ? Image.file(File(url), fit: BoxFit.contain)
+                : Image.network(
+                    url,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                              : null,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white, size: 64),
+                  ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// پلیر پیام صوتی با کنترل‌های بهتر
+class _VoiceMessagePlayer extends StatefulWidget {
+  final String url;
+  final bool isMe;
+  final bool isLocal;
+
+  const _VoiceMessagePlayer({required this.url, required this.isMe, required this.isLocal});
+
+  @override
+  State<_VoiceMessagePlayer> createState() => _VoiceMessagePlayerState();
+}
+
+class _VoiceMessagePlayerState extends State<_VoiceMessagePlayer> {
+  final ap.AudioPlayer _player = ap.AudioPlayer();
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupPlayer();
+  }
+
+  void _setupPlayer() {
+    _player.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() => _isPlaying = state == ap.PlayerState.playing);
+      }
+    });
+    _player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _player.pause();
+    } else {
+      if (widget.isLocal) {
+        await _player.play(ap.DeviceFileSource(widget.url));
+      } else {
+        await _player.play(ap.UrlSource(widget.url));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isMe ? Colors.white : AppTheme.primaryGreen;
+    final bgColor = widget.isMe ? Colors.white24 : Colors.grey.shade300;
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: _togglePlay,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _isPlaying ? Icons.pause : Icons.play_arrow,
+              color: color,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 20,
+                child: SliderTheme(
+                  data: SliderThemeData(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                    activeTrackColor: color,
+                    inactiveTrackColor: bgColor,
+                    thumbColor: color,
+                  ),
+                  child: Slider(
+                    value: _position.inMilliseconds.toDouble(),
+                    max: _duration.inMilliseconds.toDouble().clamp(1, double.infinity),
+                    onChanged: (value) {
+                      _player.seek(Duration(milliseconds: value.toInt()));
+                    },
+                  ),
+                ),
+              ),
+              Text(
+                '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: widget.isMe ? Colors.white70 : AppTheme.textGrey,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

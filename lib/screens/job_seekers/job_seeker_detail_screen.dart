@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../models/job_seeker.dart';
@@ -592,11 +593,19 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: () {
+                  final recipientId = _seeker.userId?.toString() ?? '';
+                  debugPrint('🔍 JobSeeker userId: $recipientId, seeker.id: ${_seeker.id}');
+                  if (recipientId.isEmpty || recipientId == '0' || recipientId == 'null') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('امکان ارسال پیام وجود ندارد'), backgroundColor: Colors.red),
+                    );
+                    return;
+                  }
                   Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => ChatScreen(
-                        recipientId: _seeker.id,
+                        recipientId: recipientId,
                         recipientName: _seeker.fullName,
                         recipientAvatar: _seeker.firstName[0],
                       ),

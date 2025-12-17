@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/job_seeker.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
+import '../../utils/time_ago.dart';
 import '../../widgets/filter_bottom_sheet.dart';
 import '../../widgets/add_menu_fab.dart';
 import '../../widgets/empty_state_widget.dart';
@@ -17,34 +18,84 @@ class JobSeekersListScreen extends StatefulWidget {
 }
 
 class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final List<JobSeeker> _seekers = [];
+  
+  int _currentPage = 1;
+  bool _isLoading = false;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
   String? _selectedProvince;
   RangeValues? _priceRange;
-  List<JobSeeker> _seekers = [];
-  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     _loadSeekers();
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= 
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMore();
+    }
+  }
+
   Future<void> _loadSeekers() async {
-    setState(() => _isLoading = true);
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _seekers.clear();
+      _currentPage = 1;
+      _hasMore = true;
+    });
+
     try {
       final seekers = await ApiService.getJobSeekers(
+        page: 1,
         location: _selectedProvince,
         maxSalary: _priceRange?.end.toInt(),
       );
       if (mounted) {
         setState(() {
-          _seekers = seekers;
+          _seekers.addAll(seekers);
+          _currentPage = 2;
+          _hasMore = seekers.length >= 20;
           _isLoading = false;
         });
       }
     } catch (e) {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore || _isLoading) return;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final seekers = await ApiService.getJobSeekers(
+        page: _currentPage,
+        location: _selectedProvince,
+        maxSalary: _priceRange?.end.toInt(),
+      );
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _seekers.addAll(seekers);
+          _currentPage++;
+          _hasMore = seekers.length >= 20;
+          _isLoadingMore = false;
+        });
       }
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingMore = false);
     }
   }
 
@@ -80,15 +131,10 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
                   const Icon(Icons.filter_list),
                   if (_selectedProvince != null || _priceRange != null)
                     Positioned(
-                      right: 0,
-                      top: 0,
+                      right: 0, top: 0,
                       child: Container(
-                        width: 8,
-                        height: 8,
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
+                        width: 8, height: 8,
+                        decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
                       ),
                     ),
                 ],
@@ -96,238 +142,167 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
             ),
           ],
         ),
-        body: _isLoading
-            ? ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: 5,
-                itemBuilder: (_, __) => const JobSeekerShimmer(),
-              )
-            : _seekers.isEmpty
-            ? EmptyStateWidget(
-                icon: Icons.person_search_outlined,
-                title: 'هیچ کارجویی یافت نشد',
-                message:
-                    'در حال حاضر کارجویی ثبت نشده است.\nپروفایل خود را ثبت کنید!',
-                buttonText: 'ثبت پروفایل کارجو',
-                onButtonPressed: () {},
-              )
-            : RefreshIndicator(
-                onRefresh: _loadSeekers,
-                child: ListView.builder(
-                padding: const EdgeInsets.all(20),
-                itemCount: _seekers.length,
-                itemBuilder: (context, index) {
-                  final seeker = _seekers[index];
-                  return TweenAnimationBuilder<double>(
-                    duration: Duration(milliseconds: 300 + (index * 100)),
-                    tween: Tween(begin: 0.0, end: 1.0),
-                    curve: Curves.easeOut,
-                    builder: (context, value, child) {
-                      return Opacity(
-                        opacity: value,
-                        child: Transform.translate(
-                          offset: Offset(0, 50 * (1 - value)),
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(bottom: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 20,
-                            offset: const Offset(0, 4),
-                            spreadRadius: 2,
+        body: _buildBody(),
+        floatingActionButton: const AddMenuFab(),
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading && _seekers.isEmpty) {
+      return ListView.builder(
+        padding: const EdgeInsets.all(16),
+        itemCount: 5,
+        itemBuilder: (_, __) => const JobSeekerShimmer(),
+      );
+    }
+
+    if (_seekers.isEmpty) {
+      return EmptyStateWidget(
+        icon: Icons.person_search_outlined,
+        title: 'هیچ کارجویی یافت نشد',
+        message: 'در حال حاضر کارجویی ثبت نشده است.',
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadSeekers,
+      child: ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.all(20),
+        itemCount: _seekers.length + (_hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index >= _seekers.length) {
+            return const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            );
+          }
+          return _buildSeekerCard(_seekers[index], index);
+        },
+      ),
+    );
+  }
+
+  Widget _buildSeekerCard(JobSeeker seeker, int index) {
+    return TweenAnimationBuilder<double>(
+      duration: Duration(milliseconds: 200 + (index.clamp(0, 5) * 50)),
+      tween: Tween(begin: 0.0, end: 1.0),
+      curve: Curves.easeOut,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value,
+          child: Transform.translate(offset: Offset(0, 30 * (1 - value)), child: child),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: InkWell(
+          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => JobSeekerDetailScreen(seeker: seeker))),
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundColor: AppTheme.primaryGreen,
+                      backgroundImage: seeker.profileImage != null
+                          ? NetworkImage('http://10.0.2.2:3000${seeker.profileImage}')
+                          : null,
+                      child: seeker.profileImage == null
+                          ? Text(seeker.name.isNotEmpty ? seeker.name[0] : '?',
+                              style: TextStyle(color: AppTheme.white, fontSize: 24, fontWeight: FontWeight.bold))
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(seeker.name, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.star, size: 16, color: Colors.amber),
+                              const SizedBox(width: 4),
+                              Text('${seeker.rating}', style: TextStyle(color: AppTheme.textGrey, fontSize: 14)),
+                              const SizedBox(width: 12),
+                              Icon(Icons.schedule, size: 14, color: AppTheme.textGrey),
+                              const SizedBox(width: 4),
+                              Text(TimeAgo.format(seeker.createdAt), style: TextStyle(color: AppTheme.textGrey, fontSize: 12)),
+                            ],
                           ),
                         ],
                       ),
-                      child: InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  JobSeekerDetailScreen(seeker: seeker),
-                            ),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(16),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                    Icon(Icons.arrow_forward_ios, size: 16, color: AppTheme.textGrey),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: seeker.skills.map((skill) => Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(colors: [Color(0xFF42A5F5), Color(0xFF64B5F6)]),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(skill, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                  )).toList(),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(Icons.location_on_outlined, size: 16, color: AppTheme.textGrey),
+                    const SizedBox(width: 4),
+                    Text(seeker.location, style: TextStyle(color: AppTheme.textGrey, fontSize: 14)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(color: AppTheme.background, borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: RichText(
+                          overflow: TextOverflow.ellipsis,
+                          text: TextSpan(
+                            style: TextStyle(color: AppTheme.textGrey, fontSize: 14, fontFamily: 'Vazir'),
                             children: [
-                              Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 30,
-                                    backgroundColor: AppTheme.primaryGreen,
-                                    backgroundImage: seeker.profileImage != null
-                                        ? NetworkImage('http://10.0.2.2:3000${seeker.profileImage}')
-                                        : null,
-                                    child: seeker.profileImage == null
-                                        ? Text(
-                                            seeker.name.isNotEmpty
-                                                ? seeker.name[0]
-                                                : '?',
-                                            style: TextStyle(
-                                              color: AppTheme.white,
-                                              fontSize: 24,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          )
-                                        : null,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          seeker.name,
-                                          style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppTheme.textDark,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Row(
-                                          children: [
-                                            const Icon(Icons.star,
-                                                size: 16, color: Colors.amber),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              '${seeker.rating}',
-                                              style: TextStyle(
-                                                color: AppTheme.textGrey,
-                                                fontSize: 14,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Icon(
-                                    Icons.arrow_forward_ios,
-                                    size: 16,
-                                    color: AppTheme.textGrey,
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: seeker.skills
-                                    .map((skill) => Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            gradient: const LinearGradient(
-                                              colors: [
-                                                Color(0xFF42A5F5),
-                                                Color(0xFF64B5F6),
-                                              ],
-                                            ),
-                                            borderRadius:
-                                                BorderRadius.circular(20),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: const Color(0xFF42A5F5)
-                                                    .withValues(alpha: 0.3),
-                                                blurRadius: 8,
-                                                offset: const Offset(0, 2),
-                                              ),
-                                            ],
-                                          ),
-                                          child: Text(
-                                            skill,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ))
-                                    .toList(),
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.location_on_outlined,
-                                    size: 16,
-                                    color: AppTheme.textGrey,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    seeker.location,
-                                    style: TextStyle(
-                                      color: AppTheme.textGrey,
-                                      fontSize: 14,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.background,
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Flexible(
-                                      child: RichText(
-                                        overflow: TextOverflow.ellipsis,
-                                        text: TextSpan(
-                                          style: TextStyle(
-                                            color: AppTheme.textGrey,
-                                            fontSize: 14,
-                                            fontFamily: 'Vazir',
-                                          ),
-                                          children: [
-                                            const TextSpan(
-                                                text: 'حقوق هفتگی درخواستی: '),
-                                            TextSpan(
-                                              text: NumberFormatter.formatPrice(
-                                                  seeker.expectedSalary),
-                                              style: const TextStyle(
-                                                color: Colors.blue,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                              const TextSpan(text: 'حقوق هفتگی درخواستی: '),
+                              TextSpan(
+                                text: NumberFormatter.formatPrice(seeker.expectedSalary),
+                                style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold),
                               ),
                             ],
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-        floatingActionButton: const AddMenuFab(),
-        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+          ),
+        ),
       ),
     );
   }

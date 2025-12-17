@@ -37,15 +37,27 @@ class JobSeeker {
   bool get hasAddiction => false;
 
   factory JobSeeker.fromJson(Map<String, dynamic> json) {
+    final user = json['user'] as Map<String, dynamic>?;
+    
     // عکس پروفایل از user یا از خود کارجو
     String? profileImg = json['profileImage'] ?? json['profile_image'];
-    if (profileImg == null && json['user'] != null) {
-      profileImg = json['user']['profileImage'] ?? json['user']['profile_image'];
+    if (profileImg == null && user != null) {
+      profileImg = user['profileImage'] ?? user['profile_image'];
+    }
+    
+    // userId از user.id یا مستقیم
+    int? finalUserId;
+    if (user != null && user['id'] != null) {
+      finalUserId = user['id'] is int ? user['id'] : int.tryParse(user['id'].toString());
+    } else if (json['userId'] != null) {
+      finalUserId = json['userId'] is int ? json['userId'] : int.tryParse(json['userId'].toString());
+    } else if (json['user_id'] != null) {
+      finalUserId = json['user_id'] is int ? json['user_id'] : int.tryParse(json['user_id'].toString());
     }
     
     return JobSeeker(
       id: json['id']?.toString() ?? '',
-      userId: json['userId'] ?? json['user_id'],
+      userId: finalUserId,
       name: json['name'] ?? '',
       profileImage: profileImg,
       age: json['age'],
