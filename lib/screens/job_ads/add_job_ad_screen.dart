@@ -1,14 +1,17 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import '../../models/job_ad.dart';
 import '../../models/job_category.dart';
 import '../../models/iran_provinces.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/currency_input_formatter.dart';
 import '../../utils/number_to_words.dart';
 import '../../services/api_service.dart';
+import '../../widgets/image_picker_widget.dart';
 
 class AddJobAdScreen extends StatefulWidget {
-  const AddJobAdScreen({super.key});
+  final JobAd? adToEdit;
+  
+  const AddJobAdScreen({super.key, this.adToEdit});
 
   @override
   State<AddJobAdScreen> createState() => _AddJobAdScreenState();
@@ -25,6 +28,37 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
   String? _selectedProvince;
   String _salaryWords = '';
   bool _isLoading = false;
+  List<String> _images = [];
+  
+  bool get _isEditMode => widget.adToEdit != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEditMode) {
+      _populateFields();
+    }
+  }
+  
+  void _populateFields() {
+    final ad = widget.adToEdit!;
+    _titleController.text = ad.title;
+    _dailyBagsController.text = ad.dailyBags.toString();
+    _salaryController.text = _formatNumber(ad.salary);
+    _salaryWords = NumberToWords.convert(_salaryController.text);
+    _phoneController.text = ad.phoneNumber;
+    _descriptionController.text = ad.description;
+    _selectedCategory = ad.category;
+    _selectedProvince = ad.location;
+    _images = List.from(ad.images);
+  }
+  
+  String _formatNumber(int number) {
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
 
   @override
   void dispose() {
@@ -58,7 +92,7 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final success = await ApiService.createJobAd({
+      final adData = {
         'title': _titleController.text,
         'category': _selectedCategory,
         'dailyBags': _parseNumber(_dailyBagsController.text),
@@ -66,22 +100,30 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
         'location': _selectedProvince,
         'phoneNumber': _convertPersianToEnglish(_phoneController.text),
         'description': _descriptionController.text,
-      });
+        'images': _images,
+      };
+
+      bool success;
+      if (_isEditMode) {
+        success = await ApiService.updateJobAd(widget.adToEdit!.id, adData);
+      } else {
+        success = await ApiService.createJobAd(adData);
+      }
 
       if (!mounted) return;
 
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('آگهی با موفقیت ثبت شد و پس از تایید نمایش داده می‌شود'),
+          SnackBar(
+            content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی با موفقیت ثبت شد و پس از تایید نمایش داده می‌شود'),
             backgroundColor: Colors.green,
           ),
         );
         Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('خطا در ثبت آگهی. لطفاً دوباره تلاش کنید'),
+          SnackBar(
+            content: Text(_isEditMode ? 'خطا در ویرایش آگهی' : 'خطا در ثبت آگهی. لطفاً دوباره تلاش کنید'),
             backgroundColor: Colors.red,
           ),
         );
@@ -107,7 +149,7 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('درج آگهی نیازمند همکار'),
+          title: Text(_isEditMode ? 'ویرایش آگهی' : 'درج آگهی نیازمند همکار'),
         ),
         body: Form(
           key: _formKey,
@@ -230,6 +272,14 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
                   alignLabelWithHint: true,
                 ),
               ),
+              const SizedBox(height: 16),
+              // Image picker
+              ImagePickerWidget(
+                existingImages: _images,
+                onImagesChanged: (images) => setState(() => _images = images),
+                maxImages: 3,
+                title: 'تصاویر آگهی',
+              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
@@ -245,7 +295,7 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
                             strokeWidth: 2,
                           ),
                         )
-                      : const Text('ثبت آگهی'),
+                      : Text(_isEditMode ? 'ذخیره تغییرات' : 'ثبت آگهی'),
                 ),
               ),
             ],

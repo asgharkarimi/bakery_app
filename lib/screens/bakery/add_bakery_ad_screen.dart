@@ -6,6 +6,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/app_buttons_style.dart';
 import '../../utils/currency_input_formatter.dart';
 import '../../utils/number_to_words.dart';
+import '../../widgets/image_picker_widget.dart';
 import '../map/location_picker_screen.dart';
 
 class AddBakeryAdScreen extends StatefulWidget {
@@ -34,6 +35,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
   String _monthlyRentWords = '';
   String _breadPriceWords = '';
   bool _isLoading = false;
+  List<String> _images = [];
   
   bool get _isEditMode => widget.adToEdit != null;
 
@@ -60,6 +62,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
       _breadPriceController.text = _formatNumber(ad.breadPrice!);
       _breadPriceWords = NumberToWords.convert(_breadPriceController.text);
     }
+    _images = List.from(ad.images);
     
     if (ad.type == BakeryAdType.sale && ad.salePrice != null) {
       _salePriceController.text = _formatNumber(ad.salePrice!);
@@ -112,6 +115,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         'type': _selectedType == BakeryAdType.sale ? 'sale' : 'rent',
         'location': _selectedLocation,
         'phoneNumber': _phoneController.text.trim(),
+        'images': _images,
         if (_flourQuotaController.text.isNotEmpty)
           'flourQuota': int.tryParse(_flourQuotaController.text) ?? 0,
         if (_breadPriceController.text.isNotEmpty)
@@ -443,6 +447,16 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
                 validator: (v) =>
                     v?.isEmpty ?? true ? 'توضیحات را وارد کنید' : null,
               ),
+              SizedBox(height: 16),
+
+              // Image picker
+              ImagePickerWidget(
+                existingImages: _images,
+                onImagesChanged: (images) => setState(() => _images = images),
+                maxImages: 5,
+                title: 'تصاویر نانوایی',
+              ),
+              
               SizedBox(height: 32),
 
               // Submit button

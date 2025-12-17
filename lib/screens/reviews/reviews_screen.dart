@@ -5,6 +5,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/app_buttons_style.dart';
 import '../../utils/responsive.dart';
 import 'add_review_screen.dart';
+import 'review_detail_screen.dart';
 
 class ReviewsScreen extends StatefulWidget {
   final String targetId;
@@ -23,8 +24,9 @@ class ReviewsScreen extends StatefulWidget {
 }
 
 class _ReviewsScreenState extends State<ReviewsScreen> {
-  late ReviewStats stats;
-  late List<Review> reviews;
+  ReviewStats? _stats;
+  List<Review> _reviews = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -32,9 +34,19 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     _loadData();
   }
 
-  void _loadData() {
-    stats = ReviewService.getReviewStats(widget.targetId, widget.targetType);
-    reviews = ReviewService.getReviewsForTarget(widget.targetId, widget.targetType);
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
+    
+    final stats = await ReviewService.getReviewStats(widget.targetId, widget.targetType);
+    final reviews = await ReviewService.getReviewsForTarget(widget.targetId, widget.targetType);
+    
+    if (mounted) {
+      setState(() {
+        _stats = stats;
+        _reviews = reviews;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -44,68 +56,71 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: Text('نظرات و امتیازها'),
+          title: const Text('نظرات و امتیازها'),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back),
+            icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.pop(context),
           ),
         ),
-        body: ListView(
-          padding: context.responsive.padding(all: 16),
-          children: [
-            _buildStatsCard(),
-            SizedBox(height: context.responsive.spacing(16)),
-            
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AddReviewScreen(
-                        targetId: widget.targetId,
-                        targetType: widget.targetType,
-                        targetName: widget.targetName,
-                      ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: context.responsive.padding(all: 16),
+                children: [
+                  _buildStatsCard(),
+                  SizedBox(height: context.responsive.spacing(16)),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final result = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AddReviewScreen(
+                              targetId: widget.targetId,
+                              targetType: widget.targetType,
+                              targetName: widget.targetName,
+                            ),
+                          ),
+                        );
+                        if (result == true && mounted) {
+                          _loadData();
+                        }
+                      },
+                      icon: const Icon(Icons.rate_review),
+                      label: const Text('ثبت نظر جدید'),
+                      style: AppButtonsStyle.elevatedIconButton(),
                     ),
-                  );
-                  if (result == true && mounted) {
-                    setState(() => _loadData());
-                  }
-                },
-                icon: Icon(Icons.rate_review),
-                label: Text('ثبت نظر جدید'),
-                style: AppButtonsStyle.elevatedIconButton(),
-              ),
-            ),
-            SizedBox(height: 24),
-            
-            if (reviews.isEmpty)
-              Center(
-                child: Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Column(
-                    children: [
-                      Icon(Icons.rate_review_outlined, size: 64, color: AppTheme.textGrey),
-                      SizedBox(height: 16),
-                      Text(
-                        'هنوز نظری ثبت نشده',
-                        style: TextStyle(color: AppTheme.textGrey),
-                      ),
-                    ],
                   ),
-                ),
-              )
-            else
-              ...reviews.map((review) => _buildReviewCard(review)),
-          ],
-        ),
+                  const SizedBox(height: 24),
+                  if (_reviews.isEmpty)
+                    Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Column(
+                          children: [
+                            Icon(Icons.rate_review_outlined, size: 64, color: AppTheme.textGrey),
+                            const SizedBox(height: 16),
+                            Text(
+                              'هنوز نظری ثبت نشده',
+                              style: TextStyle(color: AppTheme.textGrey),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else
+                    ..._reviews.map((review) => _buildReviewCard(review)),
+                ],
+              ),
       ),
     );
   }
 
+
   Widget _buildStatsCard() {
+    final stats = _stats ?? ReviewStats.empty();
+    
     return Card(
       child: Padding(
         padding: context.responsive.padding(all: 20),
@@ -132,15 +147,14 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                     );
                   }),
                 ),
-                SizedBox(height: 4),
+                const SizedBox(height: 4),
                 Text(
                   '${stats.totalReviews} نظر',
                   style: TextStyle(color: AppTheme.textGrey, fontSize: 12),
                 ),
               ],
             ),
-            SizedBox(width: 32),
-            
+            const SizedBox(width: 32),
             Expanded(
               child: Column(
                 children: List.generate(5, (index) {
@@ -149,15 +163,15 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                   final percentage = stats.totalReviews > 0
                       ? (count / stats.totalReviews)
                       : 0.0;
-                  
+
                   return Padding(
-                    padding: EdgeInsets.symmetric(vertical: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 2),
                     child: Row(
                       children: [
-                        Text('$star', style: TextStyle(fontSize: 12)),
-                        SizedBox(width: 4),
-                        Icon(Icons.star, size: 12, color: Colors.amber),
-                        SizedBox(width: 8),
+                        Text('$star', style: const TextStyle(fontSize: 12)),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.star, size: 12, color: Colors.amber),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: LinearProgressIndicator(
                             value: percentage,
@@ -165,7 +179,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                             valueColor: AlwaysStoppedAnimation(AppTheme.primaryGreen),
                           ),
                         ),
-                        SizedBox(width: 8),
+                        const SizedBox(width: 8),
                         Text(
                           '$count',
                           style: TextStyle(fontSize: 12, color: AppTheme.textGrey),
@@ -183,9 +197,25 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
   }
 
   Widget _buildReviewCard(Review review) {
+    // تشخیص تگ‌های منفی
+    final negativeTags = ReviewService.getNegativeTags(widget.targetType);
+    
     return Card(
       margin: EdgeInsets.only(bottom: context.responsive.spacing(12)),
-      child: Padding(
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ReviewDetailScreen(
+                review: review,
+                targetType: widget.targetType,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
         padding: context.responsive.padding(all: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,28 +224,34 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
               children: [
                 CircleAvatar(
                   radius: context.responsive.spacing(20),
-                  backgroundColor: AppTheme.primaryGreen.withOpacity(0.1),
-                  child: Text(
-                    review.reviewerAvatar,
-                    style: TextStyle(
-                      fontSize: context.responsive.fontSize(24),
-                    ),
-                  ),
+                  backgroundColor: AppTheme.primaryGreen.withValues(alpha: 0.1),
+                  backgroundImage: _hasProfileImage(review)
+                      ? NetworkImage('http://10.0.2.2:3000${review.reviewerAvatar}')
+                      : null,
+                  child: !_hasProfileImage(review)
+                      ? Text(
+                          review.reviewerName.isNotEmpty ? review.reviewerName[0] : '؟',
+                          style: TextStyle(
+                            fontSize: context.responsive.fontSize(18),
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primaryGreen,
+                          ),
+                        )
+                      : null,
                 ),
                 SizedBox(width: context.responsive.spacing(12)),
-                
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         review.reviewerName,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                         ),
                       ),
-                      SizedBox(height: 4),
+                      const SizedBox(height: 4),
                       Row(
                         children: [
                           ...List.generate(5, (index) {
@@ -227,7 +263,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                               size: 16,
                             );
                           }),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Text(
                             _getTimeAgo(review.createdAt),
                             style: TextStyle(
@@ -242,9 +278,8 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                 ),
               ],
             ),
-            
             if (review.comment.isNotEmpty) ...[
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Text(
                 review.comment,
                 style: TextStyle(
@@ -254,24 +289,26 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                 ),
               ),
             ],
-            
             if (review.tags.isNotEmpty) ...[
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
                 children: review.tags.map((tag) {
+                  final isNegative = negativeTags.contains(tag);
                   return Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: AppTheme.primaryGreen.withOpacity(0.1),
+                      color: isNegative
+                          ? Colors.red.withValues(alpha: 0.1)
+                          : AppTheme.primaryGreen.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
                       tag,
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.primaryGreen,
+                        color: isNegative ? Colors.red : AppTheme.primaryGreen,
                       ),
                     ),
                   );
@@ -280,6 +317,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
             ],
           ],
         ),
+      ),
       ),
     );
   }
@@ -295,5 +333,11 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
     } else {
       return 'همین الان';
     }
+  }
+
+  bool _hasProfileImage(Review review) {
+    return review.reviewerAvatar.isNotEmpty &&
+        review.reviewerAvatar.startsWith('/') &&
+        !review.reviewerAvatar.contains('👤');
   }
 }

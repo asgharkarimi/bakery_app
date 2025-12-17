@@ -1,5 +1,6 @@
 class EquipmentAd {
   final String id;
+  final int? userId;
   final String title;
   final String description;
   final int price;
@@ -13,6 +14,7 @@ class EquipmentAd {
 
   EquipmentAd({
     required this.id,
+    this.userId,
     required this.title,
     required this.description,
     required this.price,
@@ -28,6 +30,7 @@ class EquipmentAd {
   factory EquipmentAd.fromJson(Map<String, dynamic> json) {
     return EquipmentAd(
       id: json['id']?.toString() ?? '',
+      userId: json['userId'] ?? json['user_id'],
       title: json['title'] ?? '',
       description: json['description'] ?? '',
       price: json['price'] ?? 0,

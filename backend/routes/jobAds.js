@@ -4,6 +4,16 @@ const { Op } = require('sequelize');
 const { JobAd, User } = require('../models');
 const { auth } = require('../middleware/auth');
 
+// آگهی‌های من - باید قبل از /:id باشه
+router.get('/my/list', auth, async (req, res) => {
+  try {
+    const ads = await JobAd.findAll({ where: { userId: req.userId }, order: [['createdAt', 'DESC']] });
+    res.json({ success: true, data: ads });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // دریافت همه آگهی‌ها
 router.get('/', async (req, res) => {
   try {
@@ -81,16 +91,6 @@ router.delete('/:id', auth, async (req, res) => {
     const deleted = await JobAd.destroy({ where: { id: req.params.id, userId: req.userId } });
     if (!deleted) return res.status(404).json({ success: false, message: 'آگهی یافت نشد' });
     res.json({ success: true, message: 'آگهی حذف شد' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// آگهی‌های من
-router.get('/my/list', auth, async (req, res) => {
-  try {
-    const ads = await JobAd.findAll({ where: { userId: req.userId }, order: [['createdAt', 'DESC']] });
-    res.json({ success: true, data: ads });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

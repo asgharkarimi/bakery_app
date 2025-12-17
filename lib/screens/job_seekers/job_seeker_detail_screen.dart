@@ -1,264 +1,646 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../models/job_seeker.dart';
 import '../../models/review.dart';
 import '../../theme/app_theme.dart';
-import '../../theme/app_buttons_style.dart';
 import '../../utils/number_formatter.dart';
 import '../../utils/time_ago.dart';
-import '../../utils/responsive.dart';
 import '../../widgets/rating_badge.dart';
+import '../../services/api_service.dart';
 import '../chat/chat_screen.dart';
 import '../reviews/reviews_screen.dart';
+import 'add_job_seeker_profile_screen.dart';
 
-class JobSeekerDetailScreen extends StatelessWidget {
+class JobSeekerDetailScreen extends StatefulWidget {
   final JobSeeker seeker;
 
   const JobSeekerDetailScreen({super.key, required this.seeker});
+
+  @override
+  State<JobSeekerDetailScreen> createState() => _JobSeekerDetailScreenState();
+}
+
+class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
+  bool _isOwner = false;
+  late JobSeeker _seeker;
+
+  @override
+  void initState() {
+    super.initState();
+    _seeker = widget.seeker;
+    _checkOwnership();
+  }
+
+  Future<void> _checkOwnership() async {
+    final userId = await ApiService.getCurrentUserId();
+    if (mounted && userId != null) {
+      setState(() => _isOwner = _seeker.userId == userId);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        backgroundColor: Color(0xFFE3F2FD),
-        appBar: AppBar(
-          title: Text('پروفایل کارجو'),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
+        body: CustomScrollView(
+          slivers: [
+            // هدر با گرادیانت
+            SliverAppBar(
+              expandedHeight: 280,
+              pinned: true,
+              backgroundColor: AppTheme.primaryGreen,
+              flexibleSpace: FlexibleSpaceBar(
+                background: _buildHeader(),
+              ),
+              actions: [
+                if (_isOwner)
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.edit, color: Colors.white, size: 20),
+                    ),
+                    onPressed: () async {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => AddJobSeekerProfileScreen(profileToEdit: _seeker)),
+                      );
+                      if (result == true && mounted) {
+                        Navigator.pop(context, true);
+                      }
+                    },
+                  ),
+                const SizedBox(width: 8),
+              ],
+            ),
+
+            // محتوا
+            SliverToBoxAdapter(
+              child: Transform.translate(
+                offset: const Offset(0, -30),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF5F5F5),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 10),
+                        // مهارت‌ها
+                        _buildSkillsSection(),
+                        const SizedBox(height: 16),
+                        // اطلاعات شخصی
+                        _buildInfoCard(
+                          title: 'اطلاعات شخصی',
+                          icon: Icons.person_outline,
+                          color: Colors.blue,
+                          children: [
+                            _buildInfoRow(Icons.family_restroom, 'وضعیت تاهل', _seeker.isMarried ? 'متاهل' : 'مجرد', Colors.pink),
+                            _buildInfoRow(Icons.location_on, 'محل سکونت', _seeker.location, Colors.red),
+                            if (_seeker.age != null)
+                              _buildInfoRow(Icons.cake, 'سن', '${_seeker.age} سال', Colors.orange),
+                            _buildInfoRow(Icons.work_history, 'سابقه کار', '${_seeker.experience} سال', Colors.teal),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        // اطلاعات مالی
+                        _buildSalaryCard(),
+                        const SizedBox(height: 16),
+                        // سایر اطلاعات
+                        _buildInfoCard(
+                          title: 'سایر اطلاعات',
+                          icon: Icons.info_outline,
+                          color: Colors.purple,
+                          children: [
+                            _buildStatusRow(Icons.smoking_rooms, 'سیگاری', _seeker.isSmoker),
+                            _buildStatusRow(Icons.warning_amber, 'اعتیاد', _seeker.hasAddiction),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        // دکمه‌ها
+                        _buildActionButtons(),
+                        const SizedBox(height: 100),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
-        body: SingleChildScrollView(
-          padding: context.responsive.padding(all: 20),
-          child: Column(
-            children: [
-              CircleAvatar(
-                radius: context.responsive.spacing(60),
-                backgroundColor: AppTheme.primaryGreen,
-                backgroundImage: seeker.profileImage != null
-                    ? NetworkImage('http://10.0.2.2:3000${seeker.profileImage}')
+        // دکمه تماس ثابت
+        bottomNavigationBar: _buildBottomBar(),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            AppTheme.primaryGreen,
+            AppTheme.primaryGreen.withValues(alpha: 0.8),
+          ],
+        ),
+      ),
+      child: SafeArea(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 20),
+            // آواتار با حاشیه
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 3),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.2),
+                    blurRadius: 20,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: CircleAvatar(
+                radius: 55,
+                backgroundColor: Colors.white,
+                backgroundImage: _seeker.profileImage != null
+                    ? NetworkImage('http://10.0.2.2:3000${_seeker.profileImage}')
                     : null,
-                child: seeker.profileImage == null
+                child: _seeker.profileImage == null
                     ? Text(
-                        seeker.firstName[0],
+                        _seeker.firstName[0],
                         style: TextStyle(
-                          fontSize: context.responsive.fontSize(48),
-                          color: AppTheme.white,
+                          fontSize: 45,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryGreen,
                         ),
                       )
                     : null,
               ),
-              SizedBox(height: context.responsive.spacing(16)),
-              Text(
-                seeker.fullName,
-                style: TextStyle(
-                  fontSize: context.responsive.fontSize(24),
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.textDark,
-                ),
+            ),
+            const SizedBox(height: 16),
+            // اسم
+            Text(
+              _seeker.fullName,
+              style: const TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
               ),
-              SizedBox(height: context.responsive.spacing(8)),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryGreen.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.access_time, size: 14, color: AppTheme.primaryGreen),
-                    SizedBox(width: 4),
-                    Text(
-                      TimeAgo.format(seeker.createdAt),
-                      style: TextStyle(
-                        color: AppTheme.primaryGreen,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+            ),
+            const SizedBox(height: 8),
+            // زمان و امتیاز
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.access_time, size: 14, color: Colors.white),
+                      const SizedBox(width: 4),
+                      Text(
+                        TimeAgo.format(_seeker.createdAt),
+                        style: const TextStyle(color: Colors.white, fontSize: 12),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              SizedBox(height: 12),
-              RatingBadge(
-                targetId: seeker.id,
-                targetType: ReviewTargetType.jobSeeker,
-                targetName: seeker.fullName,
-              ),
-              SizedBox(height: 32),
-              _buildSimpleCard(
-                context,
-                'اطلاعات شخصی',
-                [
-                  _buildSimpleRow(context, Icons.family_restroom, 'وضعیت تاهل',
-                      seeker.isMarried ? 'متاهل' : 'مجرد'),
-                  _buildSimpleRow(context, Icons.location_on, 'محل سکونت', seeker.location),
-                ],
-              ),
-              SizedBox(height: 16),
-              _buildSimpleCard(
-                context,
-                'مهارت‌های شغلی',
-                [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: seeker.skills
-                        .map((skill) => Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 8,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primaryGreen,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                skill,
-                                style: TextStyle(
-                                  color: AppTheme.white,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ],
-              ),
-              SizedBox(height: 16),
-              _buildSimpleCard(
-                context,
-                'اطلاعات مالی',
-                [
-                  _buildSimpleRow(context, Icons.attach_money, 'حقوق هفتگی درخواستی',
-                      NumberFormatter.formatPrice(seeker.expectedSalary)),
-                ],
-              ),
-              SizedBox(height: 16),
-              _buildSimpleCard(
-                context,
-                'سایر اطلاعات',
-                [
-                  _buildSimpleRow(context, Icons.smoking_rooms, 'سیگار',
-                      seeker.isSmoker ? 'بله' : 'خیر'),
-                  _buildSimpleRow(context, Icons.warning, 'اعتیاد',
-                      seeker.hasAddiction ? 'بله' : 'خیر'),
-                ],
-              ),
-              SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ReviewsScreen(
-                              targetId: seeker.id,
-                              targetType: ReviewTargetType.jobSeeker,
-                              targetName: seeker.fullName,
-                            ),
-                          ),
-                        );
-                      },
-                      icon: Icon(Icons.rate_review),
-                      label: Text('نظرات'),
-                      style: AppButtonsStyle.outlinedIconButton(),
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => ChatScreen(
-                              recipientId: seeker.id,
-                              recipientName: seeker.fullName,
-                              recipientAvatar: seeker.firstName[0],
-                            ),
-                          ),
-                        );
-                      },
-                      icon: Icon(Icons.chat_bubble_outline),
-                      label: Text('پیام'),
-                      style: AppButtonsStyle.outlinedIconButton(),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+                const SizedBox(width: 8),
+                RatingBadge(
+                  targetId: _seeker.id,
+                  targetType: ReviewTargetType.jobSeeker,
+                  targetName: _seeker.fullName,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildSimpleCard(BuildContext context, String title, List<Widget> children) {
-    final responsive = Responsive(context);
+
+  Widget _buildSkillsSection() {
     return Container(
       width: double.infinity,
-      padding: responsive.padding(all: 20),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(
-          responsive.borderRadius(16),
-        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.workspace_premium, color: Colors.amber, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'مهارت‌های شغلی',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: _seeker.skills.map((skill) => _buildSkillChip(skill)).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSkillChip(String skill) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppTheme.primaryGreen, AppTheme.primaryGreen.withValues(alpha: 0.7)],
+        ),
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primaryGreen.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, color: Colors.white, size: 16),
+          const SizedBox(width: 6),
           Text(
-            title,
-            style: TextStyle(
-              fontSize: responsive.fontSize(16),
-              fontWeight: FontWeight.bold,
-              color: AppTheme.textDark,
+            skill,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
             ),
           ),
-          SizedBox(height: responsive.spacing(16)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoCard({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: 16),
           ...children,
         ],
       ),
     );
   }
 
-  Widget _buildSimpleRow(BuildContext context, IconData icon, String label, String value) {
-    final responsive = Responsive(context);
+  Widget _buildInfoRow(IconData icon, String label, String value, Color color) {
     return Padding(
-      padding: EdgeInsets.only(bottom: responsive.spacing(12)),
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            icon,
-            color: AppTheme.primaryGreen,
-            size: responsive.iconSize(20),
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 20),
           ),
-          SizedBox(width: responsive.spacing(12)),
+          const SizedBox(width: 14),
           Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  color: AppTheme.textGrey,
-                  fontSize: responsive.fontSize(14),
-                  fontFamily: 'Vazir',
-                ),
-                children: [
-                  TextSpan(text: '$label: '),
-                  TextSpan(
-                    text: value,
-                    style: TextStyle(
-                      color: AppTheme.textDark,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(fontSize: 12, color: AppTheme.textGrey)),
+                const SizedBox(height: 2),
+                Text(value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusRow(IconData icon, String label, bool status) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: (status ? Colors.red : Colors.green).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: status ? Colors.red : Colors.green, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(label, style: const TextStyle(fontSize: 15)),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: (status ? Colors.red : Colors.green).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              status ? 'بله' : 'خیر',
+              style: TextStyle(
+                color: status ? Colors.red : Colors.green,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+
+  Widget _buildSalaryCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [const Color(0xFF667eea), const Color(0xFF764ba2)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF667eea).withValues(alpha: 0.4),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Icon(Icons.payments_outlined, color: Colors.white, size: 32),
+          ),
+          const SizedBox(width: 20),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'حقوق هفتگی درخواستی',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  NumberFormatter.formatPrice(_seeker.expectedSalary),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.rate_review_outlined,
+            label: 'نظرات',
+            color: Colors.blue,
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ReviewsScreen(
+                    targetId: _seeker.id,
+                    targetType: ReviewTargetType.jobSeeker,
+                    targetName: _seeker.fullName,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.share_outlined,
+            label: 'اشتراک',
+            color: Colors.orange,
+            onTap: () {
+              Clipboard.setData(ClipboardData(
+                text: '${_seeker.fullName}\nمهارت‌ها: ${_seeker.skills.join("، ")}\nحقوق: ${NumberFormatter.formatPrice(_seeker.expectedSalary)}',
+              ));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('اطلاعات کپی شد'), backgroundColor: Colors.green),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 18),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.textDark,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 20,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            // دکمه پیام
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        recipientId: _seeker.id,
+                        recipientName: _seeker.fullName,
+                        recipientAvatar: _seeker.firstName[0],
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.chat_bubble_outline, color: Colors.white),
+                label: const Text(
+                  'ارسال پیام',
+                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryGreen,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // دکمه تماس
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: AppTheme.primaryGreen, width: 2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: IconButton(
+                onPressed: () {
+                  if (_seeker.phoneNumber != null) {
+                    Clipboard.setData(ClipboardData(text: _seeker.phoneNumber!));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('شماره ${_seeker.phoneNumber} کپی شد'),
+                        backgroundColor: AppTheme.primaryGreen,
+                      ),
+                    );
+                  }
+                },
+                icon: Icon(Icons.phone, color: AppTheme.primaryGreen),
+                padding: const EdgeInsets.all(12),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -212,6 +212,22 @@ class ApiService {
     }
   }
 
+  static Future<bool> updateJobAd(String id, Map<String, dynamic> adData) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/job-ads/$id'),
+        headers: _headers,
+        body: jsonEncode(adData),
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error updating job ad: $e');
+      return false;
+    }
+  }
+
   // ==================== Job Seekers ====================
   
   static Future<List<JobSeeker>> getJobSeekers({
@@ -285,6 +301,22 @@ class ApiService {
       return [];
     } catch (e) {
       return [];
+    }
+  }
+
+  static Future<bool> updateJobSeeker(String id, Map<String, dynamic> data) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/job-seekers/$id'),
+        headers: _headers,
+        body: jsonEncode(data),
+      );
+      final result = jsonDecode(response.body);
+      return result['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error updating job seeker: $e');
+      return false;
     }
   }
 
@@ -440,6 +472,22 @@ class ApiService {
       return [];
     } catch (e) {
       return [];
+    }
+  }
+
+  static Future<bool> updateEquipmentAd(String id, Map<String, dynamic> adData) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/equipment-ads/$id'),
+        headers: _headers,
+        body: jsonEncode(adData),
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error updating equipment ad: $e');
+      return false;
     }
   }
 

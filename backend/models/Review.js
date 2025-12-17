@@ -30,6 +30,10 @@ const Review = sequelize.define('Review', {
   comment: {
     type: DataTypes.TEXT
   },
+  tags: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
   isApproved: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,

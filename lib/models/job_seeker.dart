@@ -1,5 +1,6 @@
 class JobSeeker {
   final String id;
+  final int? userId;
   final String name;
   final String? profileImage;
   final int? age;
@@ -13,6 +14,7 @@ class JobSeeker {
 
   JobSeeker({
     required this.id,
+    this.userId,
     required this.name,
     this.profileImage,
     this.age,
@@ -43,6 +45,7 @@ class JobSeeker {
     
     return JobSeeker(
       id: json['id']?.toString() ?? '',
+      userId: json['userId'] ?? json['user_id'],
       name: json['name'] ?? '',
       profileImage: profileImg,
       age: json['age'],

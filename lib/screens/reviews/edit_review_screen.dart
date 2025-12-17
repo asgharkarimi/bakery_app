@@ -3,31 +3,38 @@ import '../../models/review.dart';
 import '../../services/review_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_buttons_style.dart';
-import '../../utils/responsive.dart';
 
-class AddReviewScreen extends StatefulWidget {
-  final String targetId;
-  final ReviewTargetType targetType;
-  final String targetName;
+class EditReviewScreen extends StatefulWidget {
+  final Review review;
 
-  const AddReviewScreen({
-    super.key,
-    required this.targetId,
-    required this.targetType,
-    required this.targetName,
-  });
+  const EditReviewScreen({super.key, required this.review});
 
   @override
-  State<AddReviewScreen> createState() => _AddReviewScreenState();
+  State<EditReviewScreen> createState() => _EditReviewScreenState();
 }
 
-class _AddReviewScreenState extends State<AddReviewScreen> {
+class _EditReviewScreenState extends State<EditReviewScreen> {
   final _formKey = GlobalKey<FormState>();
   final _commentController = TextEditingController();
-  double _rating = 5;
-  final Set<String> _selectedPositiveTags = {};
-  final Set<String> _selectedNegativeTags = {};
+  late double _rating;
+  late Set<String> _selectedPositiveTags;
+  late Set<String> _selectedNegativeTags;
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rating = widget.review.rating;
+    _commentController.text = widget.review.comment;
+    
+    final negativeTags = ReviewService.getNegativeTags(widget.review.targetType);
+    _selectedPositiveTags = widget.review.tags
+        .where((tag) => !negativeTags.contains(tag))
+        .toSet();
+    _selectedNegativeTags = widget.review.tags
+        .where((tag) => negativeTags.contains(tag))
+        .toSet();
+  }
 
   @override
   void dispose() {
@@ -41,36 +48,36 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
     setState(() => _isSubmitting = true);
 
     final allTags = [..._selectedPositiveTags, ..._selectedNegativeTags];
-    final review = Review(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      reviewerId: 'current_user',
-      reviewerName: 'شما',
-      reviewerAvatar: '👤',
-      targetId: widget.targetId,
-      targetType: widget.targetType,
+    final updatedReview = Review(
+      id: widget.review.id,
+      reviewerId: widget.review.reviewerId,
+      reviewerName: widget.review.reviewerName,
+      reviewerAvatar: widget.review.reviewerAvatar,
+      targetId: widget.review.targetId,
+      targetType: widget.review.targetType,
       rating: _rating,
       comment: _commentController.text.trim(),
-      createdAt: DateTime.now(),
+      createdAt: widget.review.createdAt,
       tags: allTags,
     );
 
-    final success = await ReviewService.addReview(review);
+    final success = await ReviewService.updateReview(widget.review.id, updatedReview);
 
     if (mounted) {
       setState(() => _isSubmitting = false);
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('نظر شما ثبت شد و پس از تایید نمایش داده می‌شود'),
+            content: const Text('نظر ویرایش شد و پس از تایید نمایش داده می‌شود'),
             backgroundColor: AppTheme.primaryGreen,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
         Navigator.pop(context, true);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('خطا در ثبت نظر. لطفاً دوباره تلاش کنید'),
+          const SnackBar(
+            content: Text('خطا در ویرایش نظر'),
             backgroundColor: Colors.red,
           ),
         );
@@ -80,78 +87,31 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final positiveTags = ReviewService.getSuggestedTags(widget.targetType);
-    final negativeTags = ReviewService.getNegativeTags(widget.targetType);
+    final positiveTags = ReviewService.getSuggestedTags(widget.review.targetType);
+    final negativeTags = ReviewService.getNegativeTags(widget.review.targetType);
 
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: Text('ثبت نظر'),
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context),
-          ),
+          title: const Text('ویرایش نظر'),
+          centerTitle: true,
         ),
         body: Form(
           key: _formKey,
           child: ListView(
-            padding: context.responsive.padding(all: 16),
+            padding: const EdgeInsets.all(16),
             children: [
-              // نام هدف
-              Card(
-                child: Padding(
-                  padding: context.responsive.padding(all: 16),
-                  child: Row(
-                    children: [
-                      Icon(
-                        widget.targetType == ReviewTargetType.jobSeeker
-                            ? Icons.person
-                            : Icons.business,
-                        color: AppTheme.primaryGreen,
-                      ),
-                      SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'نظر شما درباره:',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.textGrey,
-                              ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              widget.targetName,
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SizedBox(height: 24),
-
               // امتیاز
-              Text(
+              const Text(
                 'امتیاز شما',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Card(
                 child: Padding(
-                  padding: EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     children: [
                       Text(
@@ -162,7 +122,7 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                           color: AppTheme.primaryGreen,
                         ),
                       ),
-                      SizedBox(height: 8),
+                      const SizedBox(height: 8),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: List.generate(5, (index) {
@@ -171,9 +131,7 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                               setState(() => _rating = (index + 1).toDouble());
                             },
                             icon: Icon(
-                              index < _rating.round()
-                                  ? Icons.star
-                                  : Icons.star_border,
+                              index < _rating.round() ? Icons.star : Icons.star_border,
                               size: 40,
                               color: Colors.amber,
                             ),
@@ -184,17 +142,14 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                   ),
                 ),
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
 
               // تگ‌های مثبت
-              Text(
+              const Text(
                 'ویژگی‌های مثبت (اختیاری)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -220,17 +175,14 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                   );
                 }).toList(),
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
 
               // تگ‌های منفی
-              Text(
+              const Text(
                 'ویژگی‌های منفی (اختیاری)',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -256,31 +208,27 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                   );
                 }).toList(),
               ),
-              SizedBox(height: 24),
+              const SizedBox(height: 24),
 
               // نظر
-              Text(
+              const Text(
                 'نظر شما',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
-              SizedBox(height: 12),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _commentController,
                 maxLines: 6,
                 decoration: InputDecoration(
                   hintText: 'تجربه خود را با دیگران به اشتراک بگذارید...',
                   prefixIcon: Padding(
-                    padding: EdgeInsets.only(bottom: 80),
+                    padding: const EdgeInsets.only(bottom: 80),
                     child: Icon(Icons.comment, color: AppTheme.primaryGreen),
                   ),
                   alignLabelWithHint: true,
                 ),
-                // نظر متنی اختیاری است
               ),
-              SizedBox(height: 32),
+              const SizedBox(height: 32),
 
               // دکمه ثبت
               SizedBox(
@@ -290,17 +238,18 @@ class _AddReviewScreenState extends State<AddReviewScreen> {
                   onPressed: _isSubmitting ? null : _submitReview,
                   style: AppButtonsStyle.primaryButton(verticalPadding: 18),
                   child: _isSubmitting
-                      ? SizedBox(
+                      ? const SizedBox(
                           width: 24,
                           height: 24,
                           child: CircularProgressIndicator(
-                            color: AppTheme.white,
+                            color: Colors.white,
                             strokeWidth: 2,
                           ),
                         )
-                      : Text('ثبت نظر'),
+                      : const Text('ذخیره تغییرات'),
                 ),
               ),
+              const SizedBox(height: 16),
             ],
           ),
         ),

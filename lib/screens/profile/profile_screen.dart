@@ -3,6 +3,7 @@ import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../auth/login_screen.dart';
 import '../bookmarks/bookmarks_screen.dart';
+import '../reviews/my_reviews_screen.dart';
 import 'about_screen.dart';
 import 'my_ads_screen.dart';
 import 'edit_profile_screen.dart';
@@ -166,6 +167,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (_) => const BookmarksScreen()),
+                      );
+                    },
+                  ),
+                  _buildMenuCard(
+                    icon: Icons.rate_review,
+                    title: 'نظرات من',
+                    subtitle: 'مشاهده و مدیریت نظرات',
+                    color: Colors.purple,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const MyReviewsScreen()),
                       );
                     },
                   ),

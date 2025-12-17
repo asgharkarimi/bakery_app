@@ -4,8 +4,10 @@ import '../../models/equipment_ad.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
 import '../../services/bookmark_service.dart';
+import '../../services/api_service.dart';
 import '../chat/chat_screen.dart';
 import '../map/map_screen.dart';
+import 'add_equipment_ad_screen.dart';
 
 class EquipmentDetailScreen extends StatefulWidget {
   final EquipmentAd ad;
@@ -18,11 +20,22 @@ class EquipmentDetailScreen extends StatefulWidget {
 
 class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
   bool _isBookmarked = false;
+  bool _isOwner = false;
+  late EquipmentAd _ad;
 
   @override
   void initState() {
     super.initState();
+    _ad = widget.ad;
     _checkBookmark();
+    _checkOwnership();
+  }
+  
+  Future<void> _checkOwnership() async {
+    final userId = await ApiService.getCurrentUserId();
+    if (mounted && userId != null) {
+      setState(() => _isOwner = _ad.userId == userId);
+    }
   }
 
   Future<void> _checkBookmark() async {
@@ -68,6 +81,21 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
             onPressed: () => Navigator.pop(context),
           ),
           actions: [
+            if (_isOwner)
+              IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddEquipmentAdScreen(adToEdit: _ad),
+                    ),
+                  );
+                  if (result == true && mounted) {
+                    Navigator.pop(context, true);
+                  }
+                },
+              ),
             IconButton(
               icon: Icon(
                 _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
@@ -98,7 +126,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      widget.ad.title,
+                      _ad.title,
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
@@ -109,7 +137,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     SizedBox(height: 24),
                     
                     Text(
-                      widget.ad.description,
+                      _ad.description,
                       style: TextStyle(
                         fontSize: 16,
                         color: AppTheme.textGrey,
@@ -122,7 +150,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     _buildInfoRow(
                       icon: Icons.location_on,
                       label: 'محل',
-                      value: widget.ad.location,
+                      value: _ad.location,
                       iconColor: Color(0xFF1976D2),
                     ),
                     SizedBox(height: 20),
@@ -130,7 +158,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     _buildInfoRow(
                       icon: Icons.attach_money,
                       label: 'قیمت',
-                      value: NumberFormatter.formatPrice(widget.ad.price),
+                      value: NumberFormatter.formatPrice(_ad.price),
                       iconColor: Color(0xFF1976D2),
                     ),
                     SizedBox(height: 20),
@@ -138,7 +166,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     _buildInfoRow(
                       icon: Icons.phone,
                       label: 'تماس',
-                      value: widget.ad.phoneNumber,
+                      value: _ad.phoneNumber,
                       iconColor: Color(0xFF1976D2),
                     ),
                   ],
@@ -189,7 +217,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                   height: 56,
                   child: ElevatedButton(
                     onPressed: () {
-                      Clipboard.setData(ClipboardData(text: widget.ad.phoneNumber));
+                      Clipboard.setData(ClipboardData(text: _ad.phoneNumber));
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content: Text('شماره تماس کپی شد'),

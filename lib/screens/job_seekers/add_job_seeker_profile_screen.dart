@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../models/job_seeker.dart';
 import '../../models/job_category.dart';
 import '../../models/iran_provinces.dart';
 import '../../theme/app_theme.dart';
@@ -10,7 +11,9 @@ import '../../utils/number_to_words.dart';
 import '../../services/api_service.dart';
 
 class AddJobSeekerProfileScreen extends StatefulWidget {
-  const AddJobSeekerProfileScreen({super.key});
+  final JobSeeker? profileToEdit;
+  
+  const AddJobSeekerProfileScreen({super.key, this.profileToEdit});
 
   @override
   State<AddJobSeekerProfileScreen> createState() => _AddJobSeekerProfileScreenState();
@@ -25,12 +28,43 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
   bool _isMarried = false;
   bool _isSmoker = false;
   bool _hasAddiction = false;
-  final List<String> _selectedSkills = [];
+  List<String> _selectedSkills = [];
   String _salaryWords = '';
   File? _profileImage;
   final ImagePicker _picker = ImagePicker();
   String? _selectedProvince;
   bool _isLoading = false;
+  
+  bool get _isEditMode => widget.profileToEdit != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEditMode) {
+      _populateFields();
+    }
+  }
+  
+  void _populateFields() {
+    final profile = widget.profileToEdit!;
+    final nameParts = profile.name.split(' ');
+    _firstNameController.text = nameParts.isNotEmpty ? nameParts.first : '';
+    _lastNameController.text = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
+    _salaryController.text = _formatNumber(profile.expectedSalary);
+    _salaryWords = NumberToWords.convert(_salaryController.text);
+    _selectedProvince = profile.location;
+    _selectedSkills = List<String>.from(profile.skills);
+    _isMarried = profile.isMarried;
+    _isSmoker = profile.isSmoker;
+    _hasAddiction = profile.hasAddiction;
+  }
+  
+  String _formatNumber(int number) {
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
 
   @override
   void dispose() {
@@ -98,18 +132,23 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
         if (profileImageUrl != null) 'profileImage': profileImageUrl,
       };
 
-      final success = await ApiService.createJobSeeker(data);
+      bool success;
+      if (_isEditMode) {
+        success = await ApiService.updateJobSeeker(widget.profileToEdit!.id, data);
+      } else {
+        success = await ApiService.createJobSeeker(data);
+      }
 
       if (mounted) {
         setState(() => _isLoading = false);
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('پروفایل با موفقیت ثبت شد'), backgroundColor: Colors.green),
+            SnackBar(content: Text(_isEditMode ? 'پروفایل با موفقیت ویرایش شد' : 'پروفایل با موفقیت ثبت شد'), backgroundColor: Colors.green),
           );
           Navigator.pop(context, true);
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('خطا در ثبت پروفایل'), backgroundColor: Colors.red),
+            SnackBar(content: Text(_isEditMode ? 'خطا در ویرایش پروفایل' : 'خطا در ثبت پروفایل'), backgroundColor: Colors.red),
           );
         }
       }
@@ -129,7 +168,7 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('ایجاد پروفایل کارجو'),
+          title: Text(_isEditMode ? 'ویرایش پروفایل کارجو' : 'ایجاد پروفایل کارجو'),
         ),
         body: Form(
           key: _formKey,
@@ -305,7 +344,7 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('ثبت پروفایل'),
+                      : Text(_isEditMode ? 'ذخیره تغییرات' : 'ثبت پروفایل'),
                 ),
               ),
             ],

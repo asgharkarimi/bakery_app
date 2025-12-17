@@ -22,39 +22,53 @@ class RatingBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stats = ReviewService.getReviewStats(targetId, targetType);
+    return FutureBuilder<ReviewStats>(
+      future: ReviewService.getReviewStats(targetId, targetType),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return _buildLoading();
+        }
 
-    if (stats.totalReviews == 0) {
-      return _buildNoRating(context);
-    }
+        final stats = snapshot.data;
+        if (stats == null || stats.totalReviews == 0) {
+          return _buildNoRating(context);
+        }
 
+        return _buildRating(context, stats);
+      },
+    );
+  }
+
+  Widget _buildLoading() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppTheme.background,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: const SizedBox(
+        width: 16,
+        height: 16,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+    );
+  }
+
+  Widget _buildRating(BuildContext context, ReviewStats stats) {
     return InkWell(
-      onTap: isClickable
-          ? () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReviewsScreen(
-                    targetId: targetId,
-                    targetType: targetType,
-                    targetName: targetName,
-                  ),
-                ),
-              );
-            }
-          : null,
+      onTap: isClickable ? () => _navigateToReviews(context) : null,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppTheme.primaryGreen.withOpacity(0.1),
+          color: AppTheme.primaryGreen.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.star, color: Colors.amber, size: 18),
-            SizedBox(width: 4),
+            const Icon(Icons.star, color: Colors.amber, size: 18),
+            const SizedBox(width: 4),
             Text(
               stats.averageRating.toStringAsFixed(1),
               style: TextStyle(
@@ -64,7 +78,7 @@ class RatingBadge extends StatelessWidget {
               ),
             ),
             if (showReviewCount) ...[
-              SizedBox(width: 4),
+              const SizedBox(width: 4),
               Text(
                 '(${stats.totalReviews})',
                 style: TextStyle(
@@ -81,23 +95,10 @@ class RatingBadge extends StatelessWidget {
 
   Widget _buildNoRating(BuildContext context) {
     return InkWell(
-      onTap: isClickable
-          ? () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReviewsScreen(
-                    targetId: targetId,
-                    targetType: targetType,
-                    targetName: targetName,
-                  ),
-                ),
-              );
-            }
-          : null,
+      onTap: isClickable ? () => _navigateToReviews(context) : null,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
           color: AppTheme.background,
           borderRadius: BorderRadius.circular(8),
@@ -106,7 +107,7 @@ class RatingBadge extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.star_border, color: AppTheme.textGrey, size: 18),
-            SizedBox(width: 4),
+            const SizedBox(width: 4),
             Text(
               'بدون نظر',
               style: TextStyle(
@@ -115,6 +116,19 @@ class RatingBadge extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _navigateToReviews(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReviewsScreen(
+          targetId: targetId,
+          targetType: targetType,
+          targetName: targetName,
         ),
       ),
     );

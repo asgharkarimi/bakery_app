@@ -1,68 +1,61 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/review.dart';
 
 class ReviewService {
-  // دیتای نمونه
-  static final List<Review> _reviews = [
-    Review(
-      id: '1',
-      reviewerId: 'user1',
-      reviewerName: 'احمد رضایی',
-      reviewerAvatar: '👨‍💼',
-      targetId: 'jobseeker1',
-      targetType: ReviewTargetType.jobSeeker,
-      rating: 5,
-      comment: 'کارگر بسیار حرفه‌ای و دقیق. کیفیت کار عالی بود.',
-      createdAt: DateTime.now().subtract(Duration(days: 5)),
-      tags: ['حرفه‌ای', 'دقیق', 'باتجربه'],
-    ),
-    Review(
-      id: '2',
-      reviewerId: 'user2',
-      reviewerName: 'مریم احمدی',
-      reviewerAvatar: '👩‍💼',
-      targetId: 'jobseeker1',
-      targetType: ReviewTargetType.jobSeeker,
-      rating: 4,
-      comment: 'کار خوبی انجام داد ولی کمی دیر تحویل داد.',
-      createdAt: DateTime.now().subtract(Duration(days: 10)),
-      tags: ['باتجربه'],
-    ),
-    Review(
-      id: '3',
-      reviewerId: 'jobseeker1',
-      reviewerName: 'علی محمدی',
-      reviewerAvatar: '👨',
-      targetId: 'employer1',
-      targetType: ReviewTargetType.employer,
-      rating: 5,
-      comment: 'کارفرمای عالی، پرداخت به موقع و رفتار محترمانه.',
-      createdAt: DateTime.now().subtract(Duration(days: 3)),
-      tags: ['قابل اعتماد', 'پرداخت به موقع'],
-    ),
-  ];
+  static const String baseUrl = 'http://10.0.2.2:3000/api';
 
-  // دریافت نظرات یک شخص
-  static List<Review> getReviewsForTarget(String targetId, ReviewTargetType type) {
-    return _reviews
-        .where((r) => r.targetId == targetId && r.targetType == type)
-        .toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  static Future<Map<String, String>> _getHeaders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    return {
+      'Content-Type': 'application/json',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
+  }
+
+  // دریافت نظرات تایید شده یک شخص از API
+  static Future<List<Review>> getReviewsForTarget(
+      String targetId, ReviewTargetType type) async {
+    try {
+      final targetTypeStr =
+          type == ReviewTargetType.jobSeeker ? 'user' : 'job_ad';
+      final response = await http.get(
+        Uri.parse('$baseUrl/reviews/$targetTypeStr/$targetId'),
+      );
+      final data = jsonDecode(response.body);
+
+      if (data['success'] == true && data['data'] != null) {
+        return (data['data'] as List)
+            .map((json) => Review.fromJson(json))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error fetching reviews: $e');
+      return [];
+    }
   }
 
   // دریافت آمار نظرات
-  static ReviewStats getReviewStats(String targetId, ReviewTargetType type) {
-    final reviews = getReviewsForTarget(targetId, type);
-    
+  static Future<ReviewStats> getReviewStats(
+      String targetId, ReviewTargetType type) async {
+    final reviews = await getReviewsForTarget(targetId, type);
+
     if (reviews.isEmpty) {
       return ReviewStats.empty();
     }
 
     final totalReviews = reviews.length;
-    final averageRating = reviews.map((r) => r.rating).reduce((a, b) => a + b) / totalReviews;
-    
+    final averageRating =
+        reviews.map((r) => r.rating).reduce((a, b) => a + b) / totalReviews;
+
     final distribution = <int, int>{1: 0, 2: 0, 3: 0, 4: 0, 5: 0};
     for (var review in reviews) {
-      distribution[review.rating.round()] = (distribution[review.rating.round()] ?? 0) + 1;
+      distribution[review.rating.round()] =
+          (distribution[review.rating.round()] ?? 0) + 1;
     }
 
     return ReviewStats(
@@ -72,13 +65,88 @@ class ReviewService {
     );
   }
 
-  // ثبت نظر جدید
-  static Future<void> addReview(Review review) async {
-    await Future.delayed(Duration(seconds: 1)); // شبیه‌سازی API
-    _reviews.add(review);
+
+  // ثبت نظر جدید (نیاز به تایید ادمین دارد)
+  static Future<bool> addReview(Review review) async {
+    try {
+      final headers = await _getHeaders();
+      final body = jsonEncode(review.toJson());
+      debugPrint('📝 Sending review: $body');
+      debugPrint('🔑 Headers: $headers');
+      
+      final response = await http.post(
+        Uri.parse('$baseUrl/reviews'),
+        headers: headers,
+        body: body,
+      );
+      
+      debugPrint('📥 Response status: ${response.statusCode}');
+      debugPrint('📥 Response body: ${response.body}');
+      
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error adding review: $e');
+      return false;
+    }
   }
 
-  // تگ‌های پیشنهادی
+  // دریافت نظرات کاربر فعلی
+  static Future<List<Review>> getMyReviews() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('$baseUrl/reviews/my/list'),
+        headers: headers,
+      );
+      final data = jsonDecode(response.body);
+
+      if (data['success'] == true && data['data'] != null) {
+        return (data['data'] as List)
+            .map((json) => Review.fromJson(json))
+            .toList();
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error fetching my reviews: $e');
+      return [];
+    }
+  }
+
+  // ویرایش نظر
+  static Future<bool> updateReview(String id, Review review) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.put(
+        Uri.parse('$baseUrl/reviews/$id'),
+        headers: headers,
+        body: jsonEncode(review.toJson()),
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('Error updating review: $e');
+      return false;
+    }
+  }
+
+  // حذف نظر
+  static Future<bool> deleteReview(String id) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.delete(
+        Uri.parse('$baseUrl/reviews/$id'),
+        headers: headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('Error deleting review: $e');
+      return false;
+    }
+  }
+
+  // تگ‌های پیشنهادی مثبت
   static List<String> getSuggestedTags(ReviewTargetType type) {
     if (type == ReviewTargetType.jobSeeker) {
       return [
@@ -99,6 +167,33 @@ class ReviewService {
         'شرایط خوب',
         'محیط کار مناسب',
         'حقوق مناسب',
+      ];
+    }
+  }
+
+  // تگ‌های پیشنهادی منفی
+  static List<String> getNegativeTags(ReviewTargetType type) {
+    if (type == ReviewTargetType.jobSeeker) {
+      return [
+        'بی‌دقت',
+        'کم‌تجربه',
+        'تأخیر در کار',
+        'غیرقابل اعتماد',
+        'بی‌مسئولیت',
+        'کیفیت پایین',
+        'عدم تعهد',
+        'رفتار نامناسب',
+      ];
+    } else {
+      return [
+        'تأخیر در پرداخت',
+        'رفتار نامناسب',
+        'شرایط بد کاری',
+        'حقوق کم',
+        'عدم پایبندی به قرارداد',
+        'محیط کار نامناسب',
+        'غیرقابل اعتماد',
+        'فشار کاری زیاد',
       ];
     }
   }

@@ -4,6 +4,16 @@ const { Op } = require('sequelize');
 const { JobSeeker, User } = require('../models');
 const { auth } = require('../middleware/auth');
 
+// رزومه‌های من - باید قبل از /:id باشه
+router.get('/my/list', auth, async (req, res) => {
+  try {
+    const seekers = await JobSeeker.findAll({ where: { userId: req.userId }, order: [['createdAt', 'DESC']] });
+    res.json({ success: true, data: seekers });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // دریافت همه کارجویان
 router.get('/', async (req, res) => {
   try {
@@ -71,16 +81,6 @@ router.delete('/:id', auth, async (req, res) => {
     const deleted = await JobSeeker.destroy({ where: { id: req.params.id, userId: req.userId } });
     if (!deleted) return res.status(404).json({ success: false, message: 'کارجو یافت نشد' });
     res.json({ success: true, message: 'رزومه حذف شد' });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// رزومه‌های من
-router.get('/my/list', auth, async (req, res) => {
-  try {
-    const seekers = await JobSeeker.findAll({ where: { userId: req.userId }, order: [['createdAt', 'DESC']] });
-    res.json({ success: true, data: seekers });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
