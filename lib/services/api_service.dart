@@ -365,6 +365,22 @@ class ApiService {
     }
   }
 
+  static Future<bool> updateBakeryAd(String id, Map<String, dynamic> adData) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/bakery-ads/$id'),
+        headers: _headers,
+        body: jsonEncode(adData),
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error updating bakery ad: $e');
+      return false;
+    }
+  }
+
   // ==================== Equipment Ads ====================
   
   static Future<List<Map<String, dynamic>>> getEquipmentAds({

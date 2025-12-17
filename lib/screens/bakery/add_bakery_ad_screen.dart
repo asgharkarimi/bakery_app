@@ -9,7 +9,9 @@ import '../../utils/number_to_words.dart';
 import '../map/location_picker_screen.dart';
 
 class AddBakeryAdScreen extends StatefulWidget {
-  const AddBakeryAdScreen({super.key});
+  final BakeryAd? adToEdit;
+  
+  const AddBakeryAdScreen({super.key, this.adToEdit});
 
   @override
   State<AddBakeryAdScreen> createState() => _AddBakeryAdScreenState();
@@ -32,6 +34,54 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
   String _monthlyRentWords = '';
   String _breadPriceWords = '';
   bool _isLoading = false;
+  
+  bool get _isEditMode => widget.adToEdit != null;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_isEditMode) {
+      _populateFields();
+    }
+  }
+  
+  void _populateFields() {
+    final ad = widget.adToEdit!;
+    _titleController.text = ad.title;
+    _descriptionController.text = ad.description;
+    _selectedType = ad.type;
+    _selectedLocation = ad.location;
+    _phoneController.text = ad.phoneNumber;
+    
+    if (ad.flourQuota != null) {
+      _flourQuotaController.text = ad.flourQuota.toString();
+    }
+    if (ad.breadPrice != null) {
+      _breadPriceController.text = _formatNumber(ad.breadPrice!);
+      _breadPriceWords = NumberToWords.convert(_breadPriceController.text);
+    }
+    
+    if (ad.type == BakeryAdType.sale && ad.salePrice != null) {
+      _salePriceController.text = _formatNumber(ad.salePrice!);
+      _salePriceWords = NumberToWords.convert(_salePriceController.text);
+    } else {
+      if (ad.rentDeposit != null) {
+        _rentDepositController.text = _formatNumber(ad.rentDeposit!);
+        _rentDepositWords = NumberToWords.convert(_rentDepositController.text);
+      }
+      if (ad.monthlyRent != null) {
+        _monthlyRentController.text = _formatNumber(ad.monthlyRent!);
+        _monthlyRentWords = NumberToWords.convert(_monthlyRentController.text);
+      }
+    }
+  }
+  
+  String _formatNumber(int number) {
+    return number.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]},',
+    );
+  }
 
   @override
   void dispose() {
@@ -75,14 +125,19 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         adData['monthlyRent'] = _parsePrice(_monthlyRentController.text);
       }
 
-      final success = await ApiService.createBakeryAd(adData);
+      bool success;
+      if (_isEditMode) {
+        success = await ApiService.updateBakeryAd(widget.adToEdit!.id, adData);
+      } else {
+        success = await ApiService.createBakeryAd(adData);
+      }
 
       if (mounted) {
         setState(() => _isLoading = false);
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('آگهی با موفقیت ثبت شد و پس از تایید منتشر می‌شود'),
+              content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی با موفقیت ثبت شد و پس از تایید منتشر می‌شود'),
               backgroundColor: AppTheme.primaryGreen,
             ),
           );
@@ -90,7 +145,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('خطا در ثبت آگهی'),
+              content: Text(_isEditMode ? 'خطا در ویرایش آگهی' : 'خطا در ثبت آگهی'),
               backgroundColor: Colors.red,
             ),
           );
@@ -113,7 +168,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: Text('درج آگهی نانوایی'),
+          title: Text(_isEditMode ? 'ویرایش آگهی نانوایی' : 'درج آگهی نانوایی'),
           leading: IconButton(
             icon: Icon(Icons.arrow_back),
             onPressed: () => Navigator.pop(context),
@@ -406,7 +461,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
                             color: Colors.white,
                           ),
                         )
-                      : Text('ثبت آگهی'),
+                      : Text(_isEditMode ? 'ذخیره تغییرات' : 'ثبت آگهی'),
                 ),
               ),
               SizedBox(height: 16),

@@ -4,8 +4,10 @@ import '../../models/bakery_ad.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
 import '../../services/bookmark_service.dart';
+import '../../services/api_service.dart';
 import '../chat/chat_screen.dart';
 import '../map/map_screen.dart';
+import 'add_bakery_ad_screen.dart';
 
 class BakeryDetailScreen extends StatefulWidget {
   final BakeryAd ad;
@@ -18,13 +20,24 @@ class BakeryDetailScreen extends StatefulWidget {
 
 class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
   bool _isBookmarked = false;
+  bool _isOwner = false;
   int _currentImageIndex = 0;
   final PageController _pageController = PageController();
+  late BakeryAd _ad;
 
   @override
   void initState() {
     super.initState();
+    _ad = widget.ad;
     _checkBookmark();
+    _checkOwnership();
+  }
+  
+  Future<void> _checkOwnership() async {
+    final userId = await ApiService.getCurrentUserId();
+    if (mounted && userId != null) {
+      setState(() => _isOwner = _ad.userId == userId);
+    }
   }
 
   @override
@@ -57,7 +70,7 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final ad = widget.ad;
+    final ad = _ad;
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -75,6 +88,21 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
                     : _buildDefaultHeader(ad),
               ),
               actions: [
+                if (_isOwner)
+                  IconButton(
+                    icon: const Icon(Icons.edit, color: Colors.white),
+                    onPressed: () async {
+                      final result = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AddBakeryAdScreen(adToEdit: _ad),
+                        ),
+                      );
+                      if (result == true && mounted) {
+                        Navigator.pop(context, true);
+                      }
+                    },
+                  ),
                 IconButton(
                   icon: Icon(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, color: Colors.white),
                   onPressed: _toggleBookmark,

@@ -2,6 +2,7 @@ enum BakeryAdType { sale, rent }
 
 class BakeryAd {
   final String id;
+  final int? userId;
   final String title;
   final String description;
   final BakeryAdType type;
@@ -21,6 +22,7 @@ class BakeryAd {
 
   BakeryAd({
     required this.id,
+    this.userId,
     required this.title,
     required this.description,
     required this.type,
@@ -50,6 +52,7 @@ class BakeryAd {
     
     return BakeryAd(
       id: json['id']?.toString() ?? '',
+      userId: json['userId'] ?? json['user_id'],
       title: json['title'] ?? '',
       description: json['description'] ?? '',
       type: json['type'] == 'sale' ? BakeryAdType.sale : BakeryAdType.rent,
