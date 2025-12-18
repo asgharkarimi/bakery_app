@@ -53,6 +53,41 @@ const User = sequelize.define('User', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
     field: 'is_online'
+  },
+  // فیلدهای پروفایل کامل
+  bio: {
+    type: DataTypes.TEXT
+  },
+  city: {
+    type: DataTypes.STRING
+  },
+  province: {
+    type: DataTypes.STRING
+  },
+  birthDate: {
+    type: DataTypes.DATEONLY,
+    field: 'birth_date'
+  },
+  skills: {
+    type: DataTypes.JSON,
+    defaultValue: []
+  },
+  experience: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    comment: 'سال‌های سابقه کار'
+  },
+  education: {
+    type: DataTypes.STRING
+  },
+  instagram: {
+    type: DataTypes.STRING
+  },
+  telegram: {
+    type: DataTypes.STRING
+  },
+  website: {
+    type: DataTypes.STRING
   }
 }, {
   tableName: 'users',

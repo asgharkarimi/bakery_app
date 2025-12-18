@@ -93,12 +93,26 @@ router.get('/me', auth, async (req, res) => {
 // به‌روزرسانی پروفایل
 router.put('/profile', auth, async (req, res) => {
   try {
-    const { name, profileImage } = req.body;
-    console.log('📝 Update profile:', { userId: req.userId, name, profileImage });
+    const { 
+      name, profileImage, bio, city, province, 
+      birthDate, skills, experience, education,
+      instagram, telegram, website 
+    } = req.body;
+    console.log('📝 Update profile:', { userId: req.userId, name });
     
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (profileImage !== undefined) updateData.profileImage = profileImage;
+    if (bio !== undefined) updateData.bio = bio;
+    if (city !== undefined) updateData.city = city;
+    if (province !== undefined) updateData.province = province;
+    if (birthDate !== undefined) updateData.birthDate = birthDate;
+    if (skills !== undefined) updateData.skills = skills;
+    if (experience !== undefined) updateData.experience = experience;
+    if (education !== undefined) updateData.education = education;
+    if (instagram !== undefined) updateData.instagram = instagram;
+    if (telegram !== undefined) updateData.telegram = telegram;
+    if (website !== undefined) updateData.website = website;
     
     await User.update(updateData, { where: { id: req.userId } });
     const user = await User.findByPk(req.userId, { attributes: { exclude: ['password', 'verificationCode'] } });

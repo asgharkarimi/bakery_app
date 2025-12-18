@@ -44,6 +44,11 @@ class ApiService {
     await prefs.remove('auth_token');
   }
 
+  static Future<bool> isLoggedIn() async {
+    await _loadToken();
+    return _token != null && _token!.isNotEmpty;
+  }
+
   static Map<String, String> get _headers => {
     'Content-Type': 'application/json',
     if (_token != null) 'Authorization': 'Bearer $_token',
@@ -122,7 +127,20 @@ class ApiService {
   }
 
   // ویرایش پروفایل
-  static Future<bool> updateProfile({String? name, String? profileImage}) async {
+  static Future<bool> updateProfile({
+    String? name,
+    String? profileImage,
+    String? bio,
+    String? city,
+    String? province,
+    String? birthDate,
+    List<String>? skills,
+    int? experience,
+    String? education,
+    String? instagram,
+    String? telegram,
+    String? website,
+  }) async {
     await _loadToken();
     try {
       final response = await http.put(
@@ -131,6 +149,16 @@ class ApiService {
         body: jsonEncode({
           if (name != null) 'name': name,
           if (profileImage != null) 'profileImage': profileImage,
+          if (bio != null) 'bio': bio,
+          if (city != null) 'city': city,
+          if (province != null) 'province': province,
+          if (birthDate != null) 'birthDate': birthDate,
+          if (skills != null) 'skills': skills,
+          if (experience != null) 'experience': experience,
+          if (education != null) 'education': education,
+          if (instagram != null) 'instagram': instagram,
+          if (telegram != null) 'telegram': telegram,
+          if (website != null) 'website': website,
         }),
       );
       final data = jsonDecode(response.body);
@@ -990,8 +1018,6 @@ class ApiService {
   }
 
   // ==================== Helper ====================
-  
-  static bool get isLoggedIn => _token != null;
   
   static Future<bool> checkAuth() async {
     await _loadToken();

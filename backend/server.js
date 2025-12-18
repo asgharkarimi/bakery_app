@@ -122,7 +122,7 @@ const PORT = process.env.PORT || 3000;
 sequelize.authenticate()
   .then(() => {
     console.log('✅ اتصال به MySQL برقرار شد');
-    return sequelize.sync();
+    return sequelize.sync({ alter: true });
   })
   .then(() => {
     console.log('✅ جداول دیتابیس همگام‌سازی شدند');
