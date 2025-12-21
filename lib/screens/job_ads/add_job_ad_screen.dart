@@ -6,7 +6,7 @@ import '../../theme/app_theme.dart';
 import '../../utils/currency_input_formatter.dart';
 import '../../utils/number_to_words.dart';
 import '../../services/api_service.dart';
-import '../../widgets/image_picker_widget.dart';
+
 
 class AddJobAdScreen extends StatefulWidget {
   final JobAd? adToEdit;
@@ -28,7 +28,10 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
   String? _selectedProvince;
   String _salaryWords = '';
   bool _isLoading = false;
-  List<String> _images = [];
+  bool _hasInsurance = false;
+  bool _hasAccommodation = false;
+  bool _hasVacation = false;
+  final _vacationDaysController = TextEditingController();
   
   bool get _isEditMode => widget.adToEdit != null;
 
@@ -50,7 +53,10 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
     _descriptionController.text = ad.description;
     _selectedCategory = ad.category;
     _selectedProvince = ad.location;
-    _images = List.from(ad.images);
+    _hasInsurance = ad.hasInsurance;
+    _hasAccommodation = ad.hasAccommodation;
+    _hasVacation = ad.hasVacation;
+    _vacationDaysController.text = ad.vacationDays.toString();
   }
   
   String _formatNumber(int number) {
@@ -67,6 +73,7 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
     _salaryController.dispose();
     _phoneController.dispose();
     _descriptionController.dispose();
+    _vacationDaysController.dispose();
     super.dispose();
   }
 
@@ -100,7 +107,11 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
         'location': _selectedProvince,
         'phoneNumber': _convertPersianToEnglish(_phoneController.text),
         'description': _descriptionController.text,
-        'images': _images,
+        'images': [],
+        'hasInsurance': _hasInsurance,
+        'hasAccommodation': _hasAccommodation,
+        'hasVacation': _hasVacation,
+        'vacationDays': _hasVacation ? _parseNumber(_vacationDaysController.text) : 0,
       };
 
       bool success;
@@ -115,7 +126,7 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی با موفقیت ثبت شد و پس از تایید نمایش داده می‌شود'),
+            content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی شما با موفقیت ثبت شد و پس از تایید مدیر منتشر خواهد شد'),
             backgroundColor: Colors.green,
           ),
         );
@@ -263,6 +274,55 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
                 },
               ),
               const SizedBox(height: 16),
+              // امکانات
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('امکانات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.textDark)),
+                      const SizedBox(height: 12),
+                      SwitchListTile(
+                        title: const Text('بیمه'),
+                        subtitle: const Text('آیا بیمه تامین اجتماعی دارد؟'),
+                        value: _hasInsurance,
+                        onChanged: (v) => setState(() => _hasInsurance = v),
+                        activeColor: AppTheme.primaryGreen,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      SwitchListTile(
+                        title: const Text('محل خواب'),
+                        subtitle: const Text('آیا محل اقامت دارد؟'),
+                        value: _hasAccommodation,
+                        onChanged: (v) => setState(() => _hasAccommodation = v),
+                        activeColor: AppTheme.primaryGreen,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      SwitchListTile(
+                        title: const Text('تعطیلات'),
+                        subtitle: const Text('آیا روز تعطیل دارد؟'),
+                        value: _hasVacation,
+                        onChanged: (v) => setState(() => _hasVacation = v),
+                        activeColor: AppTheme.primaryGreen,
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      if (_hasVacation) ...[
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _vacationDaysController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'تعداد روز تعطیل در ماه',
+                            prefixIcon: Icon(Icons.calendar_today),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _descriptionController,
                 maxLines: 5,
@@ -271,14 +331,6 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
                   prefixIcon: Icon(Icons.description),
                   alignLabelWithHint: true,
                 ),
-              ),
-              const SizedBox(height: 16),
-              // Image picker
-              ImagePickerWidget(
-                existingImages: _images,
-                onImagesChanged: (images) => setState(() => _images = images),
-                maxImages: 3,
-                title: 'تصاویر آگهی',
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -295,7 +347,10 @@ class _AddJobAdScreenState extends State<AddJobAdScreen> {
                             strokeWidth: 2,
                           ),
                         )
-                      : Text(_isEditMode ? 'ذخیره تغییرات' : 'ثبت آگهی'),
+                      : Text(
+                          _isEditMode ? 'ذخیره تغییرات' : 'ثبت آگهی',
+                          style: const TextStyle(fontSize: 13),
+                        ),
                 ),
               ),
             ],

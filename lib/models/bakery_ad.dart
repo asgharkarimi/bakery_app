@@ -1,4 +1,19 @@
+import 'dart:convert';
+
 enum BakeryAdType { sale, rent }
+
+List<String> _parseImages(dynamic images) {
+  if (images == null) return [];
+  if (images is List) return List<String>.from(images);
+  if (images is String) {
+    if (images.isEmpty || images == '[]') return [];
+    try {
+      final parsed = jsonDecode(images);
+      if (parsed is List) return List<String>.from(parsed);
+    } catch (_) {}
+  }
+  return [];
+}
 
 class BakeryAd {
   final String id;
@@ -61,7 +76,7 @@ class BakeryAd {
       monthlyRent: json['monthlyRent'] ?? json['monthly_rent'],
       location: json['location'] ?? '',
       phoneNumber: json['phoneNumber'] ?? json['phone_number'] ?? '',
-      images: json['images'] != null ? List<String>.from(json['images']) : [],
+      images: _parseImages(json['images']),
       lat: parseLat,
       lng: parseLng,
       flourQuota: json['flourQuota'] ?? json['flour_quota'],

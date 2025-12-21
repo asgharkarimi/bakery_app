@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/review.dart';
 import '../../services/review_service.dart';
+import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/app_buttons_style.dart';
 import '../../utils/responsive.dart';
@@ -64,9 +65,12 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
         ),
         body: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : ListView(
-                padding: context.responsive.padding(all: 16),
-                children: [
+            : RefreshIndicator(
+                onRefresh: _loadData,
+                color: AppTheme.primaryGreen,
+                child: ListView(
+                  padding: context.responsive.padding(all: 16),
+                  children: [
                   _buildStatsCard(),
                   SizedBox(height: context.responsive.spacing(16)),
                   SizedBox(
@@ -112,6 +116,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                   else
                     ..._reviews.map((review) => _buildReviewCard(review)),
                 ],
+              ),
               ),
       ),
     );
@@ -226,7 +231,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                   radius: context.responsive.spacing(20),
                   backgroundColor: AppTheme.primaryGreen.withValues(alpha: 0.1),
                   backgroundImage: _hasProfileImage(review)
-                      ? NetworkImage('http://10.0.2.2:3000${review.reviewerAvatar}')
+                      ? NetworkImage('${ApiService.serverUrl}${review.reviewerAvatar}')
                       : null,
                   child: !_hasProfileImage(review)
                       ? Text(

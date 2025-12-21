@@ -91,8 +91,17 @@ router.post('/', auth, async (req, res) => {
   try {
     console.log('📝 Creating bakery ad with data:', req.body);
     console.log('📸 Images received:', req.body.images);
-    const ad = await BakeryAd.create({ ...req.body, userId: req.userId });
-    console.log('✅ Created bakery ad:', ad.id, 'images:', ad.images);
+    
+    // چک کردن اینکه کاربر ادمین هست یا نه
+    const user = await User.findByPk(req.userId);
+    const isAdmin = user && (user.role === 'admin' || user.phone === '09199541276');
+    
+    const ad = await BakeryAd.create({ 
+      ...req.body, 
+      userId: req.userId,
+      isApproved: isAdmin
+    });
+    console.log('✅ Created bakery ad:', ad.id, 'images:', ad.images, 'auto-approved:', isAdmin);
     res.status(201).json({ success: true, data: ad });
   } catch (error) {
     console.error('❌ Error creating bakery ad:', error);

@@ -63,8 +63,17 @@ router.post('/', auth, async (req, res) => {
   try {
     console.log('📝 ایجاد آگهی:', req.body);
     console.log('👤 کاربر:', req.userId);
-    const ad = await JobAd.create({ ...req.body, userId: req.userId });
-    console.log('✅ آگهی ایجاد شد:', ad.id);
+    
+    // چک کردن اینکه کاربر ادمین هست یا نه
+    const user = await User.findByPk(req.userId);
+    const isAdmin = user && (user.role === 'admin' || user.phone === '09199541276');
+    
+    const ad = await JobAd.create({ 
+      ...req.body, 
+      userId: req.userId,
+      isApproved: isAdmin // اگه ادمین بود، خودکار تایید بشه
+    });
+    console.log('✅ آگهی ایجاد شد:', ad.id, 'تایید خودکار:', isAdmin);
     res.status(201).json({ success: true, data: ad });
   } catch (error) {
     console.error('❌ خطا در ایجاد آگهی:', error.message);

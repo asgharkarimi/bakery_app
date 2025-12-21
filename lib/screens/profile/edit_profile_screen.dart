@@ -2,9 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/api_service.dart';
+import '../../services/user_cache_service.dart';
 import '../../theme/app_theme.dart';
-import '../../utils/jalali_date.dart';
-import '../../widgets/jalali_date_picker.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final Map<String, dynamic>? user;
@@ -17,31 +16,21 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _bioController = TextEditingController();
-  final _cityController = TextEditingController();
-  final _educationController = TextEditingController();
-  final _instagramController = TextEditingController();
-  final _telegramController = TextEditingController();
-  final _websiteController = TextEditingController();
-  
+
   final ImagePicker _picker = ImagePicker();
   File? _profileImage;
   String? _currentImageUrl;
   bool _isLoading = false;
-  
+
   String? _selectedProvince;
   int _experience = 0;
-  List<String> _skills = [];
-  DateTime? _birthDate;
-  
-  final _skillController = TextEditingController();
 
   final List<String> _provinces = [
-    'تهران', 'اصفهان', 'فارس', 'خراسان رضوی', 'آذربایجان شرقی',
+    'تهران', 'البرز', 'اصفهان', 'فارس', 'خراسان رضوی', 'آذربایجان شرقی',
     'مازندران', 'خوزستان', 'گیلان', 'کرمان', 'آذربایجان غربی',
     'سیستان و بلوچستان', 'کرمانشاه', 'گلستان', 'هرمزگان', 'لرستان',
     'همدان', 'کردستان', 'مرکزی', 'قزوین', 'اردبیل', 'بوشهر',
-    'زنجان', 'قم', 'یزد', 'چهارمحال و بختیاری', 'البرز',
+    'زنجان', 'قم', 'یزد', 'چهارمحال و بختیاری',
     'ایلام', 'کهگیلویه و بویراحمد', 'سمنان', 'خراسان شمالی', 'خراسان جنوبی'
   ];
 
@@ -55,77 +44,100 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final user = widget.user;
     if (user != null) {
       _nameController.text = user['name'] ?? '';
-      _bioController.text = user['bio'] ?? '';
-      _cityController.text = user['city'] ?? '';
-      _educationController.text = user['education'] ?? '';
-      _instagramController.text = user['instagram'] ?? '';
-      _telegramController.text = user['telegram'] ?? '';
-      _websiteController.text = user['website'] ?? '';
       _currentImageUrl = user['profileImage'];
       _selectedProvince = user['province'];
       _experience = user['experience'] ?? 0;
-      _skills = List<String>.from(user['skills'] ?? []);
-      if (user['birthDate'] != null) {
-        _birthDate = DateTime.tryParse(user['birthDate']);
-      }
     }
   }
-
 
   @override
   void dispose() {
     _nameController.dispose();
-    _bioController.dispose();
-    _cityController.dispose();
-    _educationController.dispose();
-    _instagramController.dispose();
-    _telegramController.dispose();
-    _websiteController.dispose();
-    _skillController.dispose();
     super.dispose();
   }
 
   Future<void> _pickImage() async {
-    final XFile? image = await _picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 85,
-    );
-    if (image != null) {
-      setState(() => _profileImage = File(image.path));
-    }
-  }
-
-  Future<void> _selectBirthDate() async {
-    final date = await showJalaliDatePicker(
+    showModalBottomSheet(
       context: context,
-      initialDate: _birthDate ?? DateTime(1990, 1, 1),
-      firstDate: DateTime(1950, 1, 1),
-      lastDate: DateTime.now(),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.photo_library, color: Colors.blue.shade600),
+                ),
+                title: const Text('انتخاب از گالری'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final XFile? image = await _picker.pickImage(
+                    source: ImageSource.gallery,
+                    maxWidth: 512,
+                    maxHeight: 512,
+                    imageQuality: 85,
+                  );
+                  if (image != null) {
+                    setState(() => _profileImage = File(image.path));
+                  }
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.camera_alt, color: Colors.green.shade600),
+                ),
+                title: const Text('گرفتن عکس'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final XFile? image = await _picker.pickImage(
+                    source: ImageSource.camera,
+                    maxWidth: 512,
+                    maxHeight: 512,
+                    imageQuality: 85,
+                  );
+                  if (image != null) {
+                    setState(() => _profileImage = File(image.path));
+                  }
+                },
+              ),
+              if (_profileImage != null || _currentImageUrl != null)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.delete, color: Colors.red.shade600),
+                  ),
+                  title: const Text('حذف عکس'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    setState(() {
+                      _profileImage = null;
+                      _currentImageUrl = null;
+                    });
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
     );
-    if (date != null) {
-      setState(() => _birthDate = date);
-    }
-  }
-
-  String _formatJalaliDate(DateTime date) {
-    final jalali = JalaliDate.fromDateTime(date);
-    return '${jalali.day} ${jalali.monthName} ${jalali.year}';
-  }
-
-  void _addSkill() {
-    final skill = _skillController.text.trim();
-    if (skill.isNotEmpty && !_skills.contains(skill)) {
-      setState(() {
-        _skills.add(skill);
-        _skillController.clear();
-      });
-    }
-  }
-
-  void _removeSkill(String skill) {
-    setState(() => _skills.remove(skill));
   }
 
   Future<void> _saveProfile() async {
@@ -137,13 +149,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       String? imageUrl = _currentImageUrl;
       if (_profileImage != null) {
         imageUrl = await ApiService.uploadImage(_profileImage!);
-        if (imageUrl == null) {
-          if (mounted) {
-            setState(() => _isLoading = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('خطا در آپلود عکس'), backgroundColor: Colors.red),
-            );
-          }
+        if (imageUrl == null && mounted) {
+          setState(() => _isLoading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('خطا در آپلود عکس'), backgroundColor: Colors.red),
+          );
           return;
         }
       }
@@ -151,21 +161,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final success = await ApiService.updateProfile(
         name: _nameController.text.trim(),
         profileImage: imageUrl,
-        bio: _bioController.text.trim(),
-        city: _cityController.text.trim(),
         province: _selectedProvince,
-        birthDate: _birthDate?.toIso8601String().split('T').first,
-        skills: _skills,
         experience: _experience,
-        education: _educationController.text.trim(),
-        instagram: _instagramController.text.trim(),
-        telegram: _telegramController.text.trim(),
-        website: _websiteController.text.trim(),
       );
 
       if (mounted) {
         setState(() => _isLoading = false);
         if (success) {
+          UserCacheService.markDirty();
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('پروفایل بروزرسانی شد'), backgroundColor: Colors.green),
           );
@@ -191,268 +194,275 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('ویرایش پروفایل')),
+        backgroundColor: const Color(0xFFF5F5F5),
+        appBar: AppBar(
+          title: const Text('ویرایش پروفایل'),
+          elevation: 0,
+        ),
         body: Form(
           key: _formKey,
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              // عکس پروفایل
-              Center(
-                child: Stack(
-                  children: [
-                    CircleAvatar(
-                      radius: 60,
-                      backgroundColor: AppTheme.background,
-                      backgroundImage: _profileImage != null
-                          ? FileImage(_profileImage!)
-                          : (_currentImageUrl != null
-                              ? NetworkImage('http://10.0.2.2:3000$_currentImageUrl')
-                              : null) as ImageProvider?,
-                      child: _profileImage == null && _currentImageUrl == null
-                          ? Icon(Icons.person, size: 60, color: AppTheme.textGrey)
-                          : null,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                // هدر با عکس پروفایل
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryGreen,
+                    borderRadius: const BorderRadius.only(
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
                     ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: GestureDetector(
+                  ),
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 20),
+                      GestureDetector(
                         onTap: _pickImage,
-                        child: Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryGreen,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                        child: Stack(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 3),
+                              ),
+                              child: CircleAvatar(
+                                radius: 55,
+                                backgroundColor: Colors.white,
+                                backgroundImage: _profileImage != null
+                                    ? FileImage(_profileImage!)
+                                    : (_currentImageUrl != null
+                                        ? NetworkImage('${ApiService.serverUrl}$_currentImageUrl')
+                                        : null) as ImageProvider?,
+                                child: _profileImage == null && _currentImageUrl == null
+                                    ? Icon(Icons.person, size: 55, color: AppTheme.textGrey)
+                                    : null,
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: const BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black12,
+                                      blurRadius: 4,
+                                      offset: Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: Icon(Icons.camera_alt, color: AppTheme.primaryGreen, size: 20),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              // اطلاعات اصلی
-              _buildSectionTitle('اطلاعات اصلی'),
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'نام و نام خانوادگی',
-                  prefixIcon: Icon(Icons.person),
-                ),
-                validator: (v) => v?.isEmpty ?? true ? 'نام را وارد کنید' : null,
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _bioController,
-                decoration: const InputDecoration(
-                  labelText: 'درباره من',
-                  prefixIcon: Icon(Icons.info_outline),
-                  hintText: 'چند خط درباره خودتان بنویسید...',
-                ),
-                maxLines: 3,
-                maxLength: 500,
-              ),
-              const SizedBox(height: 16),
-              
-              // تاریخ تولد
-              InkWell(
-                onTap: _selectBirthDate,
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: 'تاریخ تولد',
-                    prefixIcon: Icon(Icons.cake),
-                  ),
-                  child: Text(
-                    _birthDate != null
-                        ? _formatJalaliDate(_birthDate!)
-                        : 'انتخاب کنید',
-                    style: TextStyle(
-                      color: _birthDate != null ? AppTheme.textDark : AppTheme.textGrey,
-                    ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'برای تغییر عکس ضربه بزنید',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                      const SizedBox(height: 30),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 24),
 
-              // موقعیت مکانی
-              _buildSectionTitle('موقعیت مکانی'),
-              DropdownButtonFormField<String>(
-                value: _selectedProvince,
-                decoration: const InputDecoration(
-                  labelText: 'استان',
-                  prefixIcon: Icon(Icons.map),
-                ),
-                items: _provinces.map((p) => DropdownMenuItem(value: p, child: Text(p))).toList(),
-                onChanged: (v) => setState(() => _selectedProvince = v),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _cityController,
-                decoration: const InputDecoration(
-                  labelText: 'شهر',
-                  prefixIcon: Icon(Icons.location_city),
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              // سابقه کار و تحصیلات
-              _buildSectionTitle('سابقه کار و تحصیلات'),
-              Row(
-                children: [
-                  Expanded(
-                    child: InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'سابقه کار (سال)',
-                        prefixIcon: Icon(Icons.work_history),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.remove_circle_outline),
-                            onPressed: _experience > 0
-                                ? () => setState(() => _experience--)
-                                : null,
+                // فرم
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      // کارت نام
+                      _buildCard(
+                        icon: Icons.person_outline,
+                        title: 'نام و نام خانوادگی',
+                        child: TextFormField(
+                          controller: _nameController,
+                          decoration: const InputDecoration(
+                            hintText: 'نام خود را وارد کنید',
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.zero,
                           ),
-                          Text(
-                            '$_experience',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.add_circle_outline),
-                            onPressed: () => setState(() => _experience++),
-                          ),
-                        ],
+                          style: const TextStyle(fontSize: 16),
+                          validator: (v) => v?.isEmpty ?? true ? 'نام را وارد کنید' : null,
+                        ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _educationController,
-                decoration: const InputDecoration(
-                  labelText: 'تحصیلات',
-                  prefixIcon: Icon(Icons.school),
-                  hintText: 'مثال: دیپلم، کارشناسی...',
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              // مهارت‌ها
-              _buildSectionTitle('مهارت‌ها'),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _skillController,
-                      decoration: const InputDecoration(
-                        labelText: 'افزودن مهارت',
-                        prefixIcon: Icon(Icons.star),
-                        hintText: 'مثال: نان فانتزی',
+                      const SizedBox(height: 16),
+
+                      // کارت استان
+                      _buildCard(
+                        icon: Icons.location_on_outlined,
+                        title: 'استان محل زندگی',
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedProvince,
+                            isExpanded: true,
+                            hint: const Text('انتخاب کنید'),
+                            items: _provinces
+                                .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                                .toList(),
+                            onChanged: (v) => setState(() => _selectedProvince = v),
+                          ),
+                        ),
                       ),
-                      onFieldSubmitted: (_) => _addSkill(),
-                    ),
+                      const SizedBox(height: 16),
+
+                      // کارت سابقه کار
+                      _buildCard(
+                        icon: Icons.work_outline,
+                        title: 'سابقه کار',
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildExperienceButton(
+                              icon: Icons.remove,
+                              onTap: _experience > 0 ? () => setState(() => _experience--) : null,
+                            ),
+                            Container(
+                              width: 100,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Column(
+                                children: [
+                                  Text(
+                                    '$_experience',
+                                    style: TextStyle(
+                                      fontSize: 40,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppTheme.primaryGreen,
+                                    ),
+                                  ),
+                                  Text(
+                                    'سال',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: AppTheme.textGrey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _buildExperienceButton(
+                              icon: Icons.add,
+                              onTap: () => setState(() => _experience++),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+
+                      // دکمه ذخیره
+                      SizedBox(
+                        width: double.infinity,
+                        height: 54,
+                        child: ElevatedButton(
+                          onPressed: _isLoading ? null : _saveProfile,
+                          style: ElevatedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            elevation: 2,
+                          ),
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.check_circle_outline),
+                                    SizedBox(width: 8),
+                                    Text('ذخیره تغییرات', style: TextStyle(fontSize: 16)),
+                                  ],
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _addSkill,
-                    icon: Icon(Icons.add_circle, color: AppTheme.primaryGreen, size: 32),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: _skills.map((skill) => Chip(
-                  label: Text(skill),
-                  deleteIcon: const Icon(Icons.close, size: 18),
-                  onDeleted: () => _removeSkill(skill),
-                  backgroundColor: AppTheme.primaryGreen.withValues(alpha: 0.1),
-                  labelStyle: TextStyle(color: AppTheme.primaryGreen),
-                )).toList(),
-              ),
-              const SizedBox(height: 24),
-              
-              // شبکه‌های اجتماعی
-              _buildSectionTitle('شبکه‌های اجتماعی'),
-              TextFormField(
-                controller: _instagramController,
-                decoration: const InputDecoration(
-                  labelText: 'اینستاگرام',
-                  prefixIcon: Icon(Icons.camera_alt),
-                  hintText: 'نام کاربری بدون @',
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _telegramController,
-                decoration: const InputDecoration(
-                  labelText: 'تلگرام',
-                  prefixIcon: Icon(Icons.send),
-                  hintText: 'نام کاربری بدون @',
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _websiteController,
-                decoration: const InputDecoration(
-                  labelText: 'وب‌سایت',
-                  prefixIcon: Icon(Icons.language),
-                  hintText: 'https://...',
-                ),
-                keyboardType: TextInputType.url,
-              ),
-              const SizedBox(height: 32),
-              
-              // دکمه ذخیره
-              ElevatedButton(
-                onPressed: _isLoading ? null : _saveProfile,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 50),
-                ),
-                child: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('ذخیره تغییرات'),
-              ),
-              const SizedBox(height: 40),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Container(
-            width: 4,
-            height: 20,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryGreen,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: AppTheme.textDark,
-            ),
+  Widget _buildCard({
+    required IconData icon,
+    required String title,
+    required Widget child,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
           ),
         ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryGreen.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: AppTheme.primaryGreen, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.textGrey,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildExperienceButton({
+    required IconData icon,
+    VoidCallback? onTap,
+  }) {
+    final isEnabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: isEnabled ? AppTheme.primaryGreen : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(
+          icon,
+          color: isEnabled ? Colors.white : Colors.grey,
+          size: 24,
+        ),
       ),
     );
   }

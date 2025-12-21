@@ -58,7 +58,15 @@ router.get('/:id', async (req, res) => {
 // ایجاد آگهی
 router.post('/', auth, async (req, res) => {
   try {
-    const ad = await EquipmentAd.create({ ...req.body, userId: req.userId });
+    // چک کردن اینکه کاربر ادمین هست یا نه
+    const user = await User.findByPk(req.userId);
+    const isAdmin = user && (user.role === 'admin' || user.phone === '09199541276');
+    
+    const ad = await EquipmentAd.create({ 
+      ...req.body, 
+      userId: req.userId,
+      isApproved: isAdmin
+    });
     res.status(201).json({ success: true, data: ad });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

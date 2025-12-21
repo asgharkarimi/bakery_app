@@ -99,7 +99,7 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی با موفقیت ثبت شد'),
+              content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی شما با موفقیت ثبت شد و پس از تایید مدیر منتشر خواهد شد'),
               backgroundColor: AppTheme.primaryGreen,
             ),
           );

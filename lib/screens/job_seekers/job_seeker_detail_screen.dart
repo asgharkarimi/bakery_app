@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../models/job_seeker.dart';
 import '../../models/review.dart';
 import '../../theme/app_theme.dart';
@@ -23,6 +24,7 @@ class JobSeekerDetailScreen extends StatefulWidget {
 
 class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
   bool _isOwner = false;
+  bool _isLoggedIn = false;
   late JobSeeker _seeker;
 
   @override
@@ -30,6 +32,21 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
     super.initState();
     _seeker = widget.seeker;
     _checkOwnership();
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    final loggedIn = await ApiService.isLoggedIn();
+    if (mounted) {
+      setState(() => _isLoggedIn = loggedIn);
+    }
+  }
+
+  Future<void> _refreshData() async {
+    final refreshed = await ApiService.getJobSeekerById(_seeker.id);
+    if (refreshed != null && mounted) {
+      setState(() => _seeker = refreshed);
+    }
   }
 
   Future<void> _checkOwnership() async {
@@ -44,8 +61,11 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        body: CustomScrollView(
-          slivers: [
+        body: RefreshIndicator(
+          onRefresh: _refreshData,
+          color: AppTheme.primaryGreen,
+          child: CustomScrollView(
+            slivers: [
             // هدر با گرادیانت
             SliverAppBar(
               expandedHeight: 280,
@@ -135,6 +155,7 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
             ),
           ],
         ),
+        ),
         // دکمه تماس ثابت
         bottomNavigationBar: _buildBottomBar(),
       ),
@@ -176,7 +197,7 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
                 radius: 55,
                 backgroundColor: Colors.white,
                 backgroundImage: _seeker.profileImage != null
-                    ? NetworkImage('http://10.0.2.2:3000${_seeker.profileImage}')
+                    ? NetworkImage('${ApiService.serverUrl}${_seeker.profileImage}')
                     : null,
                 child: _seeker.profileImage == null
                     ? Text(
@@ -512,18 +533,28 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
             icon: Icons.share_outlined,
             label: 'اشتراک',
             color: Colors.orange,
-            onTap: () {
-              Clipboard.setData(ClipboardData(
-                text: '${_seeker.fullName}\nمهارت‌ها: ${_seeker.skills.join("، ")}\nحقوق: ${NumberFormatter.formatPrice(_seeker.expectedSalary)}',
-              ));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('اطلاعات کپی شد'), backgroundColor: Colors.green),
-              );
-            },
+            onTap: () => _shareSeeker(),
           ),
         ),
       ],
     );
+  }
+
+  void _shareSeeker() {
+    final shareText = '''
+👤 کارجوی نانوایی
+
+📌 ${_seeker.fullName}
+🎂 سن: ${_seeker.age} سال
+💼 سابقه کار: ${_seeker.experience} سال
+📍 محل سکونت: ${_seeker.location}
+💰 حقوق درخواستی: ${NumberFormatter.formatPrice(_seeker.expectedSalary)}
+🔧 مهارت‌ها: ${_seeker.skills.join('، ')}
+📞 تماس: ${_seeker.phoneNumber}
+
+📱 اپلیکیشن کاریابی نانوایی
+''';
+    Share.share(shareText.trim(), subject: _seeker.fullName);
   }
 
   Widget _buildActionButton({
@@ -593,6 +624,12 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: () {
+                  if (!_isLoggedIn) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('برای ارسال پیام ابتدا وارد شوید')),
+                    );
+                    return;
+                  }
                   final recipientId = _seeker.userId?.toString() ?? '';
                   debugPrint('🔍 JobSeeker userId: $recipientId, seeker.id: ${_seeker.id}');
                   if (recipientId.isEmpty || recipientId == '0' || recipientId == 'null') {
@@ -626,14 +663,20 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            // دکمه تماس
+            // دکمه تماس - فقط برای کاربران لاگین شده
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.primaryGreen, width: 2),
+                border: Border.all(color: _isLoggedIn ? AppTheme.primaryGreen : Colors.grey, width: 2),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: IconButton(
                 onPressed: () {
+                  if (!_isLoggedIn) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('برای مشاهده شماره تماس ابتدا وارد شوید')),
+                    );
+                    return;
+                  }
                   if (_seeker.phoneNumber != null) {
                     Clipboard.setData(ClipboardData(text: _seeker.phoneNumber!));
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -644,7 +687,7 @@ class _JobSeekerDetailScreenState extends State<JobSeekerDetailScreen> {
                     );
                   }
                 },
-                icon: Icon(Icons.phone, color: AppTheme.primaryGreen),
+                icon: Icon(Icons.phone, color: _isLoggedIn ? AppTheme.primaryGreen : Colors.grey),
                 padding: const EdgeInsets.all(12),
               ),
             ),

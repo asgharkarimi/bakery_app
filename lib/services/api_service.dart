@@ -13,9 +13,9 @@ import 'cache_service.dart';
 import 'encryption_service.dart';
 
 class ApiService {
-  // برای تست روی امولاتور اندروید از 10.0.2.2 استفاده کن
-  // برای دستگاه واقعی از IP کامپیوترت استفاده کن
-  static const String baseUrl = 'http://10.0.2.2:3000/api';
+  // آدرس سرور اصلی
+  static const String baseUrl = 'https://bakerjobs.ir/api';
+  static const String serverUrl = 'https://bakerjobs.ir';
   static const Duration _timeout = Duration(seconds: 5);
   
   static String? _token;
@@ -57,14 +57,17 @@ class ApiService {
   // ارسال کد تایید
   static Future<Map<String, dynamic>> sendVerificationCode(String phone) async {
     try {
+      debugPrint('📤 Sending code to: $baseUrl/auth/send-code');
       final response = await http.post(
         Uri.parse('$baseUrl/auth/send-code'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'phone': phone}),
-      );
+      ).timeout(const Duration(seconds: 30));
+      debugPrint('📥 Response: ${response.body}');
       return jsonDecode(response.body);
     } catch (e) {
-      return {'success': false, 'message': 'خطا در اتصال به سرور'};
+      debugPrint('❌ Error: $e');
+      return {'success': false, 'message': 'خطا در اتصال به سرور: $e'};
     }
   }
 
@@ -727,21 +730,27 @@ class ApiService {
 
   // ==================== Notifications ====================
   
-  static Future<List<Map<String, dynamic>>> getNotifications({int page = 1}) async {
+  static Future<Map<String, dynamic>> getNotifications({int page = 1, int limit = 20}) async {
     await _loadToken();
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/notifications?page=$page'),
+        Uri.parse('$baseUrl/notifications?page=$page&limit=$limit'),
         headers: _headers,
       );
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return List<Map<String, dynamic>>.from(data['data']);
+        return {
+          'success': true,
+          'data': data['data'] ?? [],
+          'total': data['total'] ?? 0,
+          'unreadCount': data['unreadCount'] ?? 0,
+        };
       }
-      return [];
+      return {'success': false, 'data': [], 'unreadCount': 0};
     } catch (e) {
-      return [];
+      debugPrint('❌ Error getting notifications: $e');
+      return {'success': false, 'data': [], 'unreadCount': 0};
     }
   }
 
@@ -756,6 +765,66 @@ class ApiService {
       return data['unreadCount'] ?? 0;
     } catch (e) {
       return 0;
+    }
+  }
+
+  static Future<bool> markNotificationAsRead(String id) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/notifications/$id/read'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error marking notification as read: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> markAllNotificationsAsRead() async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/notifications/read-all'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error marking all notifications as read: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> deleteNotification(String id) async {
+    await _loadToken();
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/notifications/$id'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error deleting notification: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> deleteAllNotifications() async {
+    await _loadToken();
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/notifications'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error deleting all notifications: $e');
+      return false;
     }
   }
 
@@ -783,45 +852,57 @@ class ApiService {
       final response = await http.get(
         Uri.parse('$baseUrl/chat/conversations'),
         headers: _headers,
-      );
+      ).timeout(_timeout);
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        return List<Map<String, dynamic>>.from(data['data']);
+        final conversations = List<Map<String, dynamic>>.from(data['data']);
+        // کش کردن مکالمات
+        await CacheService.cacheConversations(conversations);
+        return conversations;
       }
       return [];
     } catch (e) {
+      debugPrint('❌ Get conversations error: $e');
+      // در صورت خطا از کش استفاده کن
+      final cached = await CacheService.getConversations();
+      if (cached != null) {
+        debugPrint('📦 Using cached conversations');
+        return cached;
+      }
       return [];
     }
   }
 
-  static Future<List<Map<String, dynamic>>> getMessages(int recipientId) async {
+  static Future<List<Map<String, dynamic>>> getMessages(int recipientId, {int page = 1, int limit = 50}) async {
     await _loadToken();
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/chat/messages/$recipientId'),
+        Uri.parse('$baseUrl/chat/messages/$recipientId?page=$page&limit=$limit'),
         headers: _headers,
-      );
+      ).timeout(_timeout);
       final data = jsonDecode(response.body);
       
       if (data['success'] == true) {
-        final messages = List<Map<String, dynamic>>.from(data['data']);
-        // رمزگشایی پیام‌ها - کلید بر اساس recipientId ساخته شده
-        for (var msg in messages) {
-          if (msg['message'] != null && msg['isEncrypted'] == true) {
-            try {
-              msg['message'] = await EncryptionService.decryptMessage(msg['message'], recipientId);
-              debugPrint('🔓 Message decrypted successfully');
-            } catch (e) {
-              debugPrint('⚠️ Decryption failed: $e');
-            }
-          }
+        var messages = List<Map<String, dynamic>>.from(data['data']);
+        
+        // رمزگشایی پیام‌ها در Isolate (بدون بلاک کردن UI)
+        messages = await EncryptionService.decryptMessagesInBackground(messages, recipientId);
+        
+        // کش کردن پیام‌ها فقط برای صفحه اول (بدون await)
+        if (page == 1) {
+          CacheService.cacheChatMessages(recipientId, messages);
         }
+        
         return messages;
       }
       return [];
     } catch (e) {
       debugPrint('❌ Get messages error: $e');
+      if (page == 1) {
+        final cached = await CacheService.getChatMessages(recipientId);
+        if (cached != null) return cached;
+      }
       return [];
     }
   }
@@ -829,7 +910,7 @@ class ApiService {
   static Future<bool> sendMessage(int receiverId, String message, {int? replyToId, bool encrypt = true}) async {
     await _loadToken();
     try {
-      // رمزنگاری پیام
+      // رمزنگاری پیام قبل از ارسال
       String finalMessage = message;
       bool isEncrypted = false;
       
@@ -837,15 +918,10 @@ class ApiService {
         try {
           finalMessage = await EncryptionService.encryptMessage(message, receiverId);
           isEncrypted = true;
-          debugPrint('🔐 Message encrypted successfully');
         } catch (e) {
-          debugPrint('⚠️ Encryption failed, sending plain text: $e');
-          finalMessage = message;
-          isEncrypted = false;
+          debugPrint('⚠️ Encryption failed, sending plain: $e');
         }
       }
-      
-      debugPrint('📨 Sending message to $receiverId (encrypted: $isEncrypted)');
       
       final response = await http.post(
         Uri.parse('$baseUrl/chat/send'),
@@ -858,7 +934,6 @@ class ApiService {
         }),
       );
       
-      debugPrint('📨 Response: ${response.body}');
       final data = jsonDecode(response.body);
       return data['success'] == true;
     } catch (e) {
@@ -873,18 +948,88 @@ class ApiService {
     try {
       debugPrint('📤 sendChatMedia: receiverId=$receiverId, type=$messageType, path=${file.path}');
       
+      // چک کردن وجود فایل
+      if (!await file.exists()) {
+        debugPrint('❌ File does not exist: ${file.path}');
+        return null;
+      }
+      
+      final fileSize = await file.length();
+      debugPrint('📤 File size: $fileSize bytes');
+      
+      if (fileSize == 0) {
+        debugPrint('❌ File is empty');
+        return null;
+      }
+      
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/chat/send-media'));
       request.headers['Authorization'] = 'Bearer $_token';
       request.fields['receiverId'] = receiverId.toString();
       request.fields['messageType'] = messageType;
       if (replyToId != null) request.fields['replyToId'] = replyToId.toString();
-      request.files.add(await http.MultipartFile.fromPath('file', file.path));
       
-      debugPrint('📤 Sending request...');
-      final streamedResponse = await request.send();
+      // تعیین Content-Type بر اساس نوع فایل
+      String ext = file.path.split('.').last.toLowerCase();
+      MediaType? contentType;
+      
+      if (messageType == 'image') {
+        if (ext == 'png') {
+          contentType = MediaType('image', 'png');
+        } else if (ext == 'gif') {
+          contentType = MediaType('image', 'gif');
+        } else if (ext == 'webp') {
+          contentType = MediaType('image', 'webp');
+        } else {
+          contentType = MediaType('image', 'jpeg');
+        }
+      } else if (messageType == 'video') {
+        if (ext == 'mov') {
+          contentType = MediaType('video', 'quicktime');
+        } else if (ext == 'avi') {
+          contentType = MediaType('video', 'x-msvideo');
+        } else if (ext == 'webm') {
+          contentType = MediaType('video', 'webm');
+        } else if (ext == '3gp') {
+          contentType = MediaType('video', '3gpp');
+        } else {
+          contentType = MediaType('video', 'mp4');
+        }
+      } else if (messageType == 'voice') {
+        if (ext == 'mp3') {
+          contentType = MediaType('audio', 'mpeg');
+        } else if (ext == 'wav') {
+          contentType = MediaType('audio', 'wav');
+        } else if (ext == 'ogg') {
+          contentType = MediaType('audio', 'ogg');
+        } else if (ext == 'm4a') {
+          contentType = MediaType('audio', 'mp4');
+        } else if (ext == 'aac') {
+          contentType = MediaType('audio', 'aac');
+        } else if (ext == 'webm') {
+          contentType = MediaType('audio', 'webm');
+        } else {
+          contentType = MediaType('audio', 'aac');
+        }
+      }
+      
+      debugPrint('📤 Content-Type: $contentType, Extension: $ext');
+      
+      request.files.add(await http.MultipartFile.fromPath(
+        'file', 
+        file.path,
+        contentType: contentType,
+      ));
+      
+      debugPrint('📤 Sending request to: $baseUrl/chat/send-media');
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 60));
       final response = await http.Response.fromStream(streamedResponse);
       debugPrint('📤 Response status: ${response.statusCode}');
       debugPrint('📤 Response body: ${response.body}');
+      
+      if (response.statusCode == 500) {
+        debugPrint('❌ Server error - check if uploads/chat folder exists on server');
+        return null;
+      }
       
       final data = jsonDecode(response.body);
       
@@ -977,6 +1122,85 @@ class ApiService {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ویرایش پیام
+  static Future<bool> editMessage(int messageId, String newMessage, {int? recipientId}) async {
+    await _loadToken();
+    try {
+      // رمزنگاری پیام ویرایش شده
+      String finalMessage = newMessage;
+      bool isEncrypted = false;
+      
+      if (recipientId != null) {
+        try {
+          finalMessage = await EncryptionService.encryptMessage(newMessage, recipientId);
+          isEncrypted = true;
+        } catch (e) {
+          debugPrint('⚠️ Encryption failed for edit, sending plain: $e');
+        }
+      }
+      
+      final response = await http.put(
+        Uri.parse('$baseUrl/chat/message/$messageId'),
+        headers: _headers,
+        body: jsonEncode({
+          'message': finalMessage,
+          'isEncrypted': isEncrypted,
+        }),
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error editing message: $e');
+      return false;
+    }
+  }
+
+  // حذف پیام
+  static Future<bool> deleteMessage(int messageId) async {
+    await _loadToken();
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/chat/message/$messageId'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (e) {
+      debugPrint('❌ Error deleting message: $e');
+      return false;
+    }
+  }
+
+  // علامت‌گذاری پیام به عنوان تحویل داده شده
+  static Future<bool> markMessageDelivered(int messageId) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/chat/delivered/$messageId'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // علامت‌گذاری پیام به عنوان خوانده شده
+  static Future<bool> markMessageRead(int messageId) async {
+    await _loadToken();
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/chat/read/$messageId'),
+        headers: _headers,
+      );
+      final data = jsonDecode(response.body);
+      return data['success'] == true;
+    } catch (_) {
+      return false;
     }
   }
 

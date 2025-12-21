@@ -11,19 +11,22 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../theme/app_theme.dart';
 import '../../services/api_service.dart';
 import '../../services/socket_service.dart';
-import '../../services/encryption_service.dart';
 import '../../services/notification_manager.dart';
+import '../../services/media_cache_service.dart';
+import '../../widgets/cached_media.dart';
 
 class ChatScreen extends StatefulWidget {
   final String recipientId;
   final String recipientName;
   final String recipientAvatar;
+  final String? recipientImage;
 
   const ChatScreen({
     super.key,
     required this.recipientId,
     required this.recipientName,
     required this.recipientAvatar,
+    this.recipientImage,
   });
 
   @override
@@ -43,7 +46,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _isBlocked = false;
   bool _isOnline = false;
   bool _isRecording = false;
-  String? _recordingPath;
   Duration _recordingDuration = Duration.zero;
   Timer? _recordingTimer;
   String? _lastSeen;
@@ -51,6 +53,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _typingTimer;
   int? _myUserId;
   Map<String, dynamic>? _replyTo;
+  
+  // Pagination
+  int _currentPage = 1;
+  bool _isLoadingMore = false;
+  bool _hasMoreMessages = true;
 
 
   @override
@@ -60,7 +67,48 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // جلوگیری از نمایش اعلان در این چت
     NotificationManager.setCurrentChat(widget.recipientId);
     _recorderController = RecorderController();
+    
+    // لیسنر برای اسکرول به بالا
+    _scrollController.addListener(_onScroll);
+    
     _init();
+  }
+  
+  // وقتی به بالای لیست رسید، پیام‌های قدیمی‌تر رو لود کن
+  void _onScroll() {
+    if (_scrollController.position.pixels <= 100 && 
+        !_isLoadingMore && 
+        _hasMoreMessages &&
+        !_isLoading) {
+      _loadMoreMessages();
+    }
+  }
+  
+  Future<void> _loadMoreMessages() async {
+    if (_isLoadingMore || !_hasMoreMessages) return;
+    
+    setState(() => _isLoadingMore = true);
+    
+    try {
+      final olderMessages = await ApiService.getMessages(
+        int.parse(widget.recipientId),
+        page: _currentPage + 1,
+      );
+      
+      if (olderMessages.isEmpty) {
+        setState(() => _hasMoreMessages = false);
+      } else {
+        setState(() {
+          _currentPage++;
+          // پیام‌های قدیمی‌تر رو به اول لیست اضافه کن
+          _messages.insertAll(0, olderMessages);
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Load more messages error: $e');
+    }
+    
+    setState(() => _isLoadingMore = false);
   }
 
   @override
@@ -73,45 +121,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
+    // اول userId رو بگیر (سریع)
     _myUserId = await ApiService.getCurrentUserId();
-    ApiService.setOnline();
     
-    // اتصال به WebSocket
+    // اتصال به WebSocket (بدون await)
     if (_myUserId != null) {
       SocketService.connect(_myUserId!);
       SocketService.onNewMessage = _onNewMessageReceived;
       SocketService.onUserTyping = _onUserTypingReceived;
+      SocketService.onMessageDelivered = _onMessageDelivered;
+      SocketService.onMessageRead = _onMessageRead;
+      SocketService.onMessageEdited = _onMessageEdited;
+      SocketService.onMessageDeleted = _onMessageDeleted;
     }
     
-    await _loadUserInfo();
-    await _loadMessages();
+    // لود موازی بدون بلاک کردن UI - با timeout
+    Future.wait([
+      _loadUserInfo().timeout(const Duration(seconds: 10), onTimeout: () {}),
+      _loadMessages().timeout(const Duration(seconds: 15), onTimeout: () {
+        if (mounted) setState(() => _isLoading = false);
+      }),
+    ]);
     
-    // فقط برای بکاپ، هر 10 ثانیه چک کن
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      _loadMessages(showLoading: false);
+    // setOnline بدون await
+    ApiService.setOnline();
+    
+    // فقط برای بکاپ، هر 60 ثانیه چک کن
+    _refreshTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted) _loadMessages(showLoading: false);
     });
   }
   
-  void _onNewMessageReceived(Map<String, dynamic> message) async {
+  void _onNewMessageReceived(Map<String, dynamic> message) {
     final senderId = message['senderId']?.toString();
     if (senderId == widget.recipientId && mounted) {
-      // رمزگشایی پیام اگه رمزشده باشه
-      if (message['isEncrypted'] == true && message['message'] != null) {
-        try {
-          final decrypted = await EncryptionService.decryptMessage(
-            message['message'],
-            int.parse(widget.recipientId),
-          );
-          message['message'] = decrypted;
-        } catch (e) {
-          debugPrint('❌ WebSocket decrypt error: $e');
-        }
-      }
-      
       setState(() {
         _messages.add(message);
       });
       _scrollToBottom();
+      
+      final messageId = message['id'];
+      if (messageId != null) {
+        ApiService.markMessageRead(messageId);
+      }
     }
   }
   
@@ -120,6 +172,57 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => _isTyping = true);
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _isTyping = false);
+      });
+    }
+  }
+
+  // وقتی پیام تحویل داده شد
+  void _onMessageDelivered(int messageId) {
+    if (mounted) {
+      setState(() {
+        final index = _messages.indexWhere((m) => m['id'] == messageId);
+        if (index != -1) {
+          _messages[index]['isDelivered'] = true;
+        }
+      });
+    }
+  }
+
+  // وقتی پیام خوانده شد
+  void _onMessageRead(int messageId) {
+    if (mounted) {
+      setState(() {
+        final index = _messages.indexWhere((m) => m['id'] == messageId);
+        if (index != -1) {
+          _messages[index]['isDelivered'] = true;
+          _messages[index]['isRead'] = true;
+        }
+      });
+    }
+  }
+
+  // وقتی پیام ویرایش شد
+  void _onMessageEdited(int messageId, String newMessage) {
+    if (mounted) {
+      setState(() {
+        final index = _messages.indexWhere((m) => m['id'] == messageId);
+        if (index != -1) {
+          _messages[index]['message'] = newMessage;
+          _messages[index]['isEdited'] = true;
+        }
+      });
+    }
+  }
+
+  // وقتی پیام حذف شد
+  void _onMessageDeleted(int messageId) {
+    if (mounted) {
+      setState(() {
+        final index = _messages.indexWhere((m) => m['id'] == messageId);
+        if (index != -1) {
+          _messages[index]['isDeleted'] = true;
+          _messages[index]['message'] = 'این پیام حذف شده است';
+        }
       });
     }
   }
@@ -135,12 +238,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _checkTyping() async {
-    final typing = await ApiService.isTyping(int.parse(widget.recipientId));
-    if (mounted && typing != _isTyping) {
-      setState(() => _isTyping = typing);
-    }
-  }
 
   Future<void> _loadMessages({bool showLoading = true}) async {
     if (showLoading && mounted) setState(() => _isLoading = true);
@@ -150,6 +247,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _messages = messages;
           _isLoading = false;
+          _currentPage = 1;
+          _hasMoreMessages = messages.length >= 50;
         });
         if (showLoading) _scrollToBottom();
       }
@@ -159,9 +258,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _onTextChanged(String text) {
-    _typingTimer?.cancel();
-    ApiService.sendTyping(int.parse(widget.recipientId));
-    _typingTimer = Timer(const Duration(seconds: 2), () {});
+    // فقط یک بار در هر 2 ثانیه typing ارسال کن
+    if (_typingTimer?.isActive != true) {
+      ApiService.sendTyping(int.parse(widget.recipientId));
+      _typingTimer = Timer(const Duration(seconds: 2), () {});
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -322,7 +423,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String _formatTime(String? dateStr) {
     if (dateStr == null) return '';
     try {
-      final time = DateTime.parse(dateStr);
+      var time = DateTime.parse(dateStr);
+      // تبدیل UTC به وقت ایران (+3:30)
+      if (time.isUtc || !dateStr.contains('+')) {
+        time = time.toLocal();
+      }
       return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
     } catch (e) {
       return '';
@@ -332,7 +437,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String _formatLastSeen(String? dateStr) {
     if (dateStr == null) return '';
     try {
-      final time = DateTime.parse(dateStr);
+      var time = DateTime.parse(dateStr);
+      // تبدیل UTC به وقت محلی
+      if (time.isUtc || !dateStr.contains('+')) {
+        time = time.toLocal();
+      }
       final diff = DateTime.now().difference(time);
       if (diff.inMinutes < 1) return 'همین الان';
       if (diff.inMinutes < 60) return '${diff.inMinutes} دقیقه پیش';
@@ -381,7 +490,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       
       setState(() {
         _isRecording = true;
-        _recordingPath = path;
         _recordingDuration = Duration.zero;
       });
       
@@ -454,7 +562,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await _recorderController.stop();
       setState(() {
         _isRecording = false;
-        _recordingPath = null;
         _recordingDuration = Duration.zero;
       });
     } catch (e) {
@@ -476,6 +583,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: const Color(0xFFE3F2FD),
+        resizeToAvoidBottomInset: true,
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
@@ -488,7 +596,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   CircleAvatar(
                     radius: 20,
                     backgroundColor: const Color(0xFF1976D2),
-                    child: Text(widget.recipientAvatar, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                    backgroundImage: (widget.recipientImage != null && widget.recipientImage!.isNotEmpty)
+                        ? NetworkImage('${ApiService.serverUrl}${widget.recipientImage}')
+                        : null,
+                    child: (widget.recipientImage == null || widget.recipientImage!.isEmpty)
+                        ? Text(widget.recipientAvatar, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold))
+                        : null,
                   ),
                   if (_isOnline)
                     Positioned(
@@ -582,215 +695,200 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
-      itemCount: _messages.length,
-      itemBuilder: (context, index) => _buildMessageItem(_messages[index]),
+      itemCount: _messages.length + (_isLoadingMore ? 1 : 0),
+      cacheExtent: 1000,
+      addAutomaticKeepAlives: false,
+      addRepaintBoundaries: true,
+      itemBuilder: (context, index) {
+        // نمایش loading در بالای لیست
+        if (_isLoadingMore && index == 0) {
+          return const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        
+        final messageIndex = _isLoadingMore ? index - 1 : index;
+        final message = _messages[messageIndex];
+        // استفاده از key برای جلوگیری از rebuild غیرضروری
+        return RepaintBoundary(
+          key: ValueKey(message['id'] ?? messageIndex),
+          child: _MessageBubble(
+            message: message,
+            isMe: message['senderId']?.toString() == _myUserId?.toString(),
+            onLongPress: () => _showMessageOptions(message),
+            onReply: () => setState(() => _replyTo = message),
+            formatTime: _formatTime,
+          ),
+        );
+      },
     );
   }
 
-  Widget _buildMessageItem(Map<String, dynamic> message) {
+  void _showMessageOptions(Map<String, dynamic> message) {
     final senderId = message['senderId']?.toString() ?? '';
     final isMe = senderId == _myUserId?.toString();
     final messageType = message['messageType'] ?? 'text';
-    final replyTo = message['replyTo'] as Map<String, dynamic>?;
-
-    return GestureDetector(
-      onLongPress: () => _showMessageOptions(message),
-      child: Align(
-        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
-          decoration: BoxDecoration(
-            color: isMe ? AppTheme.primaryGreen : Colors.white,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(16),
-              topRight: const Radius.circular(16),
-              bottomLeft: isMe ? const Radius.circular(16) : const Radius.circular(4),
-              bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(16),
-            ),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 2))],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (replyTo != null) _buildReplyBubble(replyTo, isMe),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildMessageContent(message, messageType, isMe),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatTime(message['createdAt']),
-                      style: TextStyle(color: isMe ? Colors.white70 : AppTheme.textGrey, fontSize: 11),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReplyBubble(Map<String, dynamic> reply, bool isMe) {
-    final message = reply['message'] ?? '';
-    final messageType = reply['messageType'] ?? 'text';
+    final isDeleted = message['isDeleted'] == true;
     
-    return Container(
-      margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: isMe ? Colors.white.withOpacity(0.2) : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
-        border: Border(right: BorderSide(color: isMe ? Colors.white : AppTheme.primaryGreen, width: 3)),
-      ),
-      child: messageType == 'text' && message.isNotEmpty
-          ? FutureBuilder<String>(
-              future: _decryptIfNeeded(message),
-              builder: (context, snapshot) {
-                return Text(
-                  snapshot.data ?? message,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
-                );
-              },
-            )
-          : Text(
-              message.isNotEmpty ? message : '[$messageType]',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
-            ),
-    );
-  }
-
-  // چک کردن و رمزگشایی متن اگه لازم باشه
-  Future<String> _decryptIfNeeded(String text) async {
-    if (text.isEmpty) return text;
-    // چک کردن اینکه متن شبیه Base64 رمزشده هست
-    final base64Pattern = RegExp(r'^[A-Za-z0-9+/=]+$');
-    if (text.length > 5 && base64Pattern.hasMatch(text) && (text.endsWith('=') || text.contains('/'))) {
-      try {
-        final decrypted = await EncryptionService.decryptMessage(text, int.parse(widget.recipientId));
-        return decrypted;
-      } catch (e) {
-        return text;
-      }
-    }
-    return text;
-  }
-
-  Widget _buildMessageContent(Map<String, dynamic> message, String type, bool isMe) {
-    final mediaUrl = message['mediaUrl'] ?? '';
-    final isLocal = message['isLocal'] == true;
-    final fullUrl = isLocal ? mediaUrl : 'http://10.0.2.2:3000$mediaUrl';
-
-    switch (type) {
-      case 'image':
-        return GestureDetector(
-          onTap: () => _showFullImage(fullUrl, isLocal),
-          child: Hero(
-            tag: 'image_$mediaUrl',
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: isLocal
-                  ? Image.file(File(mediaUrl), width: 200, fit: BoxFit.cover)
-                  : Image.network(fullUrl, width: 200, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.broken_image)),
-            ),
-          ),
-        );
-      case 'video':
-        return _buildVideoPlayer(isLocal ? mediaUrl : fullUrl, isLocal);
-      case 'voice':
-        return _VoiceMessagePlayer(url: fullUrl, isMe: isMe, isLocal: isLocal);
-      default:
-        return Text(message['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : AppTheme.textDark, fontSize: 15));
-    }
-  }
-
-  void _showFullImage(String url, bool isLocal) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => FullImageScreen(url: url, isLocal: isLocal),
-      ),
-    );
-  }
-
-  Widget _buildVideoPlayer(String url, bool isLocal) {
-    return GestureDetector(
-      onTap: () => _playVideo(url, isLocal),
-      child: Container(
-        width: 200,
-        height: 150,
-        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.videocam, color: Colors.white, size: 14),
-                    SizedBox(width: 4),
-                    Text('ویدیو', style: TextStyle(color: Colors.white, fontSize: 10)),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _playVideo(String url, bool isLocal) {
-    debugPrint('🎥 Playing video: $url, isLocal: $isLocal');
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => VideoPlayerScreen(url: url, isLocal: isLocal)),
-    );
-  }
-
-
-  void _showMessageOptions(Map<String, dynamic> message) {
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.reply),
-              title: const Text('پاسخ دادن'),
-              onTap: () {
-                Navigator.pop(ctx);
-                setState(() => _replyTo = message);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.copy),
-              title: const Text('کپی متن'),
-              onTap: () {
-                Navigator.pop(ctx);
-                // Clipboard.setData(ClipboardData(text: message['message'] ?? ''));
-              },
-            ),
+            // پاسخ دادن
+            if (!isDeleted)
+              ListTile(
+                leading: const Icon(Icons.reply),
+                title: const Text('پاسخ دادن'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() => _replyTo = message);
+                },
+              ),
+            // کپی متن
+            if (messageType == 'text' && !isDeleted)
+              ListTile(
+                leading: const Icon(Icons.copy),
+                title: const Text('کپی متن'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  // Clipboard.setData(ClipboardData(text: message['message'] ?? ''));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('متن کپی شد')),
+                  );
+                },
+              ),
+            // ویرایش پیام (فقط برای پیام‌های خودم و متنی)
+            if (isMe && messageType == 'text' && !isDeleted)
+              ListTile(
+                leading: const Icon(Icons.edit, color: Colors.blue),
+                title: const Text('ویرایش پیام'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showEditMessageDialog(message);
+                },
+              ),
+            // حذف پیام (فقط برای پیام‌های خودم)
+            if (isMe && !isDeleted)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('حذف پیام'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _confirmDeleteMessage(message);
+                },
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  // دیالوگ ویرایش پیام
+  void _showEditMessageDialog(Map<String, dynamic> message) {
+    final controller = TextEditingController(text: message['message'] ?? '');
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ویرایش پیام'),
+        content: TextField(
+          controller: controller,
+          maxLines: null,
+          decoration: const InputDecoration(
+            hintText: 'متن جدید پیام...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('انصراف'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final newMessage = controller.text.trim();
+              if (newMessage.isEmpty) return;
+              
+              Navigator.pop(ctx);
+              
+              final messageId = message['id'];
+              if (messageId == null) return;
+              
+              final success = await ApiService.editMessage(
+                messageId, 
+                newMessage,
+                recipientId: int.tryParse(widget.recipientId),
+              );
+              if (success && mounted) {
+                // آپدیت لوکال
+                setState(() {
+                  final index = _messages.indexWhere((m) => m['id'] == messageId);
+                  if (index != -1) {
+                    _messages[index]['message'] = newMessage;
+                    _messages[index]['isEdited'] = true;
+                  }
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('پیام ویرایش شد'), backgroundColor: Colors.green),
+                );
+              } else if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('خطا در ویرایش پیام'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: const Text('ذخیره'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // تایید حذف پیام
+  void _confirmDeleteMessage(Map<String, dynamic> message) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف پیام'),
+        content: const Text('آیا از حذف این پیام مطمئن هستید؟'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('خیر'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              
+              final messageId = message['id'];
+              if (messageId == null) return;
+              
+              final success = await ApiService.deleteMessage(messageId);
+              if (success && mounted) {
+                // آپدیت لوکال
+                setState(() {
+                  final index = _messages.indexWhere((m) => m['id'] == messageId);
+                  if (index != -1) {
+                    _messages[index]['isDeleted'] = true;
+                    _messages[index]['message'] = 'این پیام حذف شده است';
+                  }
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('پیام حذف شد')),
+                );
+              } else if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('خطا در حذف پیام'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: const Text('بله، حذف شود', style: TextStyle(color: Colors.white)),
+          ),
+        ],
       ),
     );
   }
@@ -824,52 +922,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildInputArea() {
     // حالت ضبط صدا
     if (_isRecording) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
+      return SafeArea(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           color: Colors.red.shade50,
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
-        ),
-        child: SafeArea(
           child: Row(
             children: [
-              // دکمه لغو
               IconButton(
                 icon: const Icon(Icons.delete, color: Colors.red),
                 onPressed: _cancelRecording,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
               ),
-              // نمایش مدت زمان ضبط
               Expanded(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Container(
-                      width: 12,
-                      height: 12,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       _formatDuration(_recordingDuration),
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red),
                     ),
-                    const SizedBox(width: 8),
-                    const Text('در حال ضبط...', style: TextStyle(color: Colors.red)),
                   ],
                 ),
               ),
-              // دکمه ارسال
               Container(
-                decoration: const BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                ),
+                decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
                 child: IconButton(
-                  icon: const Icon(Icons.send, color: Colors.white),
+                  icon: const Icon(Icons.send, color: Colors.white, size: 20),
                   onPressed: _stopRecording,
+                  padding: const EdgeInsets.all(8),
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 ),
               ),
             ],
@@ -879,57 +967,67 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     // حالت عادی
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
+    final hasText = _messageController.text.trim().isNotEmpty;
+    
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -2))],
-      ),
-      child: SafeArea(
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             IconButton(
-              icon: const Icon(Icons.attach_file),
+              icon: const Icon(Icons.attach_file, size: 22),
               onPressed: _showAttachmentOptions,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
             Expanded(
               child: TextField(
                 controller: _messageController,
-                onChanged: _onTextChanged,
+                onChanged: (text) {
+                  _onTextChanged(text);
+                  setState(() {}); // برای آپدیت دکمه‌ها
+                },
                 decoration: InputDecoration(
-                  hintText: 'پیام خود را بنویسید...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                  hintText: 'پیام...',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
                   filled: true,
                   fillColor: AppTheme.background,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  isDense: true,
                 ),
-                maxLines: null,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendMessage(),
+                minLines: 1,
+                maxLines: 4,
+                style: const TextStyle(fontSize: 15),
               ),
             ),
-            const SizedBox(width: 8),
-            // دکمه ضبط صدا
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.orange.shade400,
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.mic, color: Colors.white),
-                onPressed: _startRecording,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF1976D2),
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.send, color: Colors.white),
-                onPressed: _sendMessage,
-              ),
+            const SizedBox(width: 4),
+            // دکمه میکروفون یا ارسال
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+              child: hasText
+                  ? Container(
+                      key: const ValueKey('send'),
+                      decoration: const BoxDecoration(color: Color(0xFF1976D2), shape: BoxShape.circle),
+                      child: IconButton(
+                        icon: const Icon(Icons.send, color: Colors.white, size: 20),
+                        onPressed: _sendMessage,
+                        padding: const EdgeInsets.all(8),
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      ),
+                    )
+                  : Container(
+                      key: const ValueKey('mic'),
+                      decoration: BoxDecoration(color: Colors.orange.shade400, shape: BoxShape.circle),
+                      child: IconButton(
+                        icon: const Icon(Icons.mic, color: Colors.white, size: 20),
+                        onPressed: _startRecording,
+                        padding: const EdgeInsets.all(8),
+                        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                      ),
+                    ),
             ),
           ],
         ),
@@ -946,24 +1044,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           children: [
             ListTile(
               leading: const Icon(Icons.image, color: Colors.blue),
-              title: const Text('تصویر'),
+              title: const Text('تصویر از گالری'),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickImage();
               },
             ),
             ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.green),
+              title: const Text('عکس با دوربین'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _takePhoto();
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.videocam, color: Colors.red),
-              title: const Text('ویدیو'),
+              title: const Text('ویدیو از گالری'),
               onTap: () {
                 Navigator.pop(ctx);
                 _pickVideo();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_call, color: Colors.orange),
+              title: const Text('فیلم با دوربین'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _recordVideo();
               },
             ),
           ],
         ),
       ),
     );
+  }
+
+  // گرفتن عکس با دوربین
+  Future<void> _takePhoto() async {
+    final XFile? image = await _picker.pickImage(source: ImageSource.camera);
+    if (image != null) await _sendMedia(File(image.path), 'image');
+  }
+
+  // گرفتن فیلم با دوربین
+  Future<void> _recordVideo() async {
+    final XFile? video = await _picker.pickVideo(source: ImageSource.camera);
+    if (video != null) await _sendMedia(File(video.path), 'video');
   }
 }
 
@@ -1232,6 +1358,414 @@ class _VoiceMessagePlayerState extends State<_VoiceMessagePlayer> {
                   fontSize: 10,
                   color: widget.isMe ? Colors.white70 : AppTheme.textGrey,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ویجت بهینه‌شده برای هر پیام - جدا از لیست اصلی برای جلوگیری از rebuild
+class _MessageBubble extends StatelessWidget {
+  final Map<String, dynamic> message;
+  final bool isMe;
+  final VoidCallback onLongPress;
+  final VoidCallback onReply;
+  final String Function(String?) formatTime;
+
+  const _MessageBubble({
+    required this.message,
+    required this.isMe,
+    required this.onLongPress,
+    required this.onReply,
+    required this.formatTime,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final messageType = message['messageType'] ?? 'text';
+    final replyTo = message['replyTo'] as Map<String, dynamic>?;
+    final isDeleted = message['isDeleted'] == true;
+    final isEdited = message['isEdited'] == true;
+    final isDelivered = message['isDelivered'] == true;
+    final isRead = message['isRead'] == true;
+
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+          decoration: BoxDecoration(
+            color: isMe ? AppTheme.primaryGreen : Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: isMe ? const Radius.circular(16) : const Radius.circular(4),
+              bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(16),
+            ),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5, offset: const Offset(0, 2))],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (replyTo != null) _buildReplyBubble(replyTo, isMe),
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (isDeleted)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.block, size: 14, color: isMe ? Colors.white54 : AppTheme.textGrey),
+                          const SizedBox(width: 4),
+                          Text(
+                            'این پیام حذف شده است',
+                            style: TextStyle(
+                              color: isMe ? Colors.white54 : AppTheme.textGrey,
+                              fontSize: 14,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      _buildMessageContent(context, message, messageType, isMe),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isEdited && !isDeleted)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Text(
+                              'ویرایش شده',
+                              style: TextStyle(
+                                color: isMe ? Colors.white54 : AppTheme.textGrey,
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        Text(
+                          formatTime(message['createdAt']),
+                          style: TextStyle(color: isMe ? Colors.white70 : AppTheme.textGrey, fontSize: 11),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          _buildMessageStatus(isDelivered, isRead),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMessageStatus(bool isDelivered, bool isRead) {
+    if (isRead) {
+      return Icon(Icons.done_all, size: 16, color: Colors.lightBlueAccent.shade100);
+    } else if (isDelivered) {
+      return const Icon(Icons.done_all, size: 16, color: Colors.white70);
+    } else {
+      return const Icon(Icons.done, size: 16, color: Colors.white70);
+    }
+  }
+
+  Widget _buildReplyBubble(Map<String, dynamic> reply, bool isMe) {
+    final replyMessage = reply['message'] ?? '';
+    final replyType = reply['messageType'] ?? 'text';
+    
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: isMe ? Colors.white.withOpacity(0.2) : Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(8),
+        border: Border(right: BorderSide(color: isMe ? Colors.white : AppTheme.primaryGreen, width: 3)),
+      ),
+      child: Text(
+        replyType == 'text' && replyMessage.isNotEmpty 
+            ? (replyMessage.length > 50 ? '${replyMessage.substring(0, 50)}...' : replyMessage)
+            : '[$replyType]',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12, color: isMe ? Colors.white70 : AppTheme.textGrey),
+      ),
+    );
+  }
+
+  Widget _buildMessageContent(BuildContext context, Map<String, dynamic> message, String type, bool isMe) {
+    final mediaUrl = message['mediaUrl'] ?? '';
+    final isLocal = message['isLocal'] == true;
+    final fullUrl = isLocal ? mediaUrl : '${ApiService.serverUrl}$mediaUrl';
+
+    switch (type) {
+      case 'image':
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => FullImageScreen(url: fullUrl, isLocal: isLocal)),
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: isLocal
+                ? Image.file(File(mediaUrl), width: 200, fit: BoxFit.cover)
+                : CachedNetworkImage(
+                    imageUrl: fullUrl,
+                    width: 200,
+                    fit: BoxFit.cover,
+                    borderRadius: BorderRadius.circular(8),
+                    placeholder: Container(
+                      width: 200,
+                      height: 150,
+                      color: Colors.grey.shade300,
+                      child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                    ),
+                    errorWidget: Container(
+                      width: 200,
+                      height: 150,
+                      color: Colors.grey.shade300,
+                      child: const Icon(Icons.broken_image, size: 40),
+                    ),
+                  ),
+          ),
+        );
+      case 'video':
+        if (isLocal) {
+          return GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => VideoPlayerScreen(url: fullUrl, isLocal: true)),
+            ),
+            child: Container(
+              width: 200,
+              height: 150,
+              decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
+              child: const Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(Icons.play_circle_fill, color: Colors.white, size: 50),
+                ],
+              ),
+            ),
+          );
+        }
+        return CachedVideo(
+          videoUrl: fullUrl,
+          width: 200,
+          height: 150,
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => VideoPlayerScreen(url: fullUrl, isLocal: false)),
+          ),
+        );
+      case 'voice':
+        return _CachedVoicePlayer(url: fullUrl, isMe: isMe, isLocal: isLocal);
+      default:
+        return Text(message['message'] ?? '', style: TextStyle(color: isMe ? Colors.white : AppTheme.textDark, fontSize: 15));
+    }
+  }
+}
+
+// پلیر پیام صوتی با کش
+class _CachedVoicePlayer extends StatefulWidget {
+  final String url;
+  final bool isMe;
+  final bool isLocal;
+
+  const _CachedVoicePlayer({required this.url, required this.isMe, required this.isLocal});
+
+  @override
+  State<_CachedVoicePlayer> createState() => _CachedVoicePlayerState();
+}
+
+class _CachedVoicePlayerState extends State<_CachedVoicePlayer> {
+  final ap.AudioPlayer _player = ap.AudioPlayer();
+  bool _isPlaying = false;
+  bool _isLoading = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  String? _cachedPath;
+  double _downloadProgress = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupPlayer();
+    if (!widget.isLocal) {
+      _cacheAudio();
+    }
+  }
+
+  void _setupPlayer() {
+    _player.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() => _isPlaying = state == ap.PlayerState.playing);
+      }
+    });
+    _player.onDurationChanged.listen((d) {
+      if (mounted) setState(() => _duration = d);
+    });
+    _player.onPositionChanged.listen((p) {
+      if (mounted) setState(() => _position = p);
+    });
+  }
+
+  Future<void> _cacheAudio() async {
+    // اول چک کن کش شده یا نه
+    var path = await MediaCacheService.getCachedPath(
+      widget.url,
+      type: MediaType.audio,
+    );
+    
+    if (path != null) {
+      if (mounted) setState(() => _cachedPath = path);
+      return;
+    }
+
+    // دانلود و کش کن با نمایش پیشرفت
+    setState(() {
+      _isLoading = true;
+      _downloadProgress = 0;
+    });
+    path = await MediaCacheService.downloadAndCache(
+      widget.url,
+      type: MediaType.audio,
+      onProgress: (progress) {
+        if (mounted) setState(() => _downloadProgress = progress);
+      },
+    );
+    if (mounted) {
+      setState(() {
+        _cachedPath = path;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _player.pause();
+    } else {
+      if (widget.isLocal) {
+        await _player.play(ap.DeviceFileSource(widget.url));
+      } else if (_cachedPath != null) {
+        await _player.play(ap.DeviceFileSource(_cachedPath!));
+      } else {
+        await _player.play(ap.UrlSource(widget.url));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.isMe ? Colors.white : AppTheme.primaryGreen;
+    final bgColor = widget.isMe ? Colors.white24 : Colors.grey.shade300;
+    
+    if (_isLoading) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2, 
+              color: color,
+              value: _downloadProgress > 0 ? _downloadProgress : null,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            _downloadProgress > 0 ? '${(_downloadProgress * 100).toInt()}%' : 'در حال دانلود...',
+            style: TextStyle(color: color, fontSize: 12),
+          ),
+        ],
+      );
+    }
+    
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        GestureDetector(
+          onTap: _togglePlay,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _isPlaying ? Icons.pause : Icons.play_arrow,
+              color: color,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                height: 20,
+                child: SliderTheme(
+                  data: SliderThemeData(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                    activeTrackColor: color,
+                    inactiveTrackColor: bgColor,
+                    thumbColor: color,
+                  ),
+                  child: Slider(
+                    value: _position.inMilliseconds.toDouble(),
+                    max: _duration.inMilliseconds.toDouble().clamp(1, double.infinity),
+                    onChanged: (value) {
+                      _player.seek(Duration(milliseconds: value.toInt()));
+                    },
+                  ),
+                ),
+              ),
+              Row(
+                children: [
+                  Text(
+                    '${_formatDuration(_position)} / ${_formatDuration(_duration)}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: widget.isMe ? Colors.white70 : AppTheme.textGrey,
+                    ),
+                  ),
+                  if (_cachedPath != null) ...[
+                    const SizedBox(width: 4),
+                    Icon(Icons.check_circle, size: 10, color: Colors.green.shade400),
+                  ],
+                ],
               ),
             ],
           ),

@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 import '../../models/bakery_ad.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
@@ -28,8 +31,11 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
   final _phoneController = TextEditingController();
   final _flourQuotaController = TextEditingController();
   final _breadPriceController = TextEditingController();
+  final _locationController = TextEditingController();
   BakeryAdType _selectedType = BakeryAdType.sale;
-  String? _selectedLocation;
+  LatLng? _selectedLatLng;
+  String? _selectedAddress;
+  bool _isLoadingAddress = false;
   String _salePriceWords = '';
   String _rentDepositWords = '';
   String _monthlyRentWords = '';
@@ -52,7 +58,8 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
     _titleController.text = ad.title;
     _descriptionController.text = ad.description;
     _selectedType = ad.type;
-    _selectedLocation = ad.location;
+    _selectedAddress = ad.location;
+    _locationController.text = ad.location;
     _phoneController.text = ad.phoneNumber;
     
     if (ad.flourQuota != null) {
@@ -96,11 +103,40 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
     _phoneController.dispose();
     _flourQuotaController.dispose();
     _breadPriceController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
   int _parsePrice(String value) {
     return int.tryParse(value.replaceAll(',', '')) ?? 0;
+  }
+
+  // دریافت آدرس از مختصات با Nominatim
+  Future<String?> _getAddressFromLatLng(LatLng latLng) async {
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=${latLng.latitude}&lon=${latLng.longitude}&accept-language=fa',
+      );
+      final response = await http.get(url, headers: {
+        'User-Agent': 'BakeryApp/1.0',
+      });
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final address = data['address'];
+        // ساخت آدرس خوانا
+        final parts = <String>[];
+        if (address['state'] != null) parts.add(address['state']);
+        if (address['county'] != null) parts.add(address['county']);
+        if (address['city'] != null) parts.add(address['city']);
+        if (address['suburb'] != null) parts.add(address['suburb']);
+        if (address['neighbourhood'] != null) parts.add(address['neighbourhood']);
+        if (address['road'] != null) parts.add(address['road']);
+        return parts.isNotEmpty ? parts.join('، ') : data['display_name'];
+      }
+    } catch (e) {
+      debugPrint('Error getting address: $e');
+    }
+    return null;
   }
 
   Future<void> _submitAd() async {
@@ -113,9 +149,11 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'type': _selectedType == BakeryAdType.sale ? 'sale' : 'rent',
-        'location': _selectedLocation,
+        'location': _selectedAddress ?? 'موقعیت انتخاب شده',
         'phoneNumber': _phoneController.text.trim(),
         'images': _images,
+        if (_selectedLatLng != null) 'lat': _selectedLatLng!.latitude,
+        if (_selectedLatLng != null) 'lng': _selectedLatLng!.longitude,
         if (_flourQuotaController.text.isNotEmpty)
           'flourQuota': int.tryParse(_flourQuotaController.text) ?? 0,
         if (_breadPriceController.text.isNotEmpty)
@@ -141,7 +179,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی با موفقیت ثبت شد و پس از تایید منتشر می‌شود'),
+              content: Text(_isEditMode ? 'آگهی با موفقیت ویرایش شد' : 'آگهی شما با موفقیت ثبت شد و پس از تایید مدیر منتشر خواهد شد'),
               backgroundColor: AppTheme.primaryGreen,
             ),
           );
@@ -387,33 +425,49 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
               // Location picker from map
               TextFormField(
                 readOnly: true,
+                controller: _locationController,
                 decoration: InputDecoration(
                   labelText: 'محل',
                   hintText: 'انتخاب از روی نقشه',
-                  prefixIcon: Icon(Icons.location_on, color: AppTheme.primaryGreen),
+                  prefixIcon: _isLoadingAddress
+                      ? Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : Icon(Icons.location_on, color: AppTheme.primaryGreen),
                   suffixIcon: Icon(Icons.map, color: AppTheme.primaryGreen),
                 ),
-                controller: TextEditingController(text: _selectedLocation),
                 onTap: () async {
                   final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => LocationPickerScreen(),
+                      builder: (_) => LocationPickerScreen(
+                        initialLocation: _selectedLatLng,
+                      ),
                     ),
                   );
-                  if (result != null && mounted) {
+                  if (result != null && result is LatLng && mounted) {
                     setState(() {
-                      _selectedLocation = result.toString();
+                      _selectedLatLng = result;
+                      _isLoadingAddress = true;
+                      _locationController.text = 'در حال دریافت آدرس...';
                     });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('موقعیت از نقشه انتخاب شد'),
-                        backgroundColor: AppTheme.primaryGreen,
-                      ),
-                    );
+                    // دریافت آدرس از مختصات
+                    final address = await _getAddressFromLatLng(result);
+                    if (mounted) {
+                      setState(() {
+                        _isLoadingAddress = false;
+                        _selectedAddress = address ?? 'موقعیت انتخاب شده';
+                        _locationController.text = _selectedAddress!;
+                      });
+                    }
                   }
                 },
-                validator: (v) => _selectedLocation == null ? 'محل را از روی نقشه انتخاب کنید' : null,
+                validator: (v) => _selectedLatLng == null && _selectedAddress == null ? 'محل را از روی نقشه انتخاب کنید' : null,
               ),
               SizedBox(height: 16),
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/notification_service.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../screens/notifications/notifications_screen.dart';
 
@@ -19,11 +20,12 @@ class NotificationBadge extends StatefulWidget {
 
 class _NotificationBadgeState extends State<NotificationBadge> {
   int _unreadCount = 0;
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _updateCount();
+    _loadUnreadCount();
     NotificationService.addListener(_onNewNotification);
   }
 
@@ -35,14 +37,27 @@ class _NotificationBadgeState extends State<NotificationBadge> {
 
   void _onNewNotification(AppNotification notification) {
     if (mounted) {
-      _updateCount();
+      _loadUnreadCount();
     }
   }
 
-  void _updateCount() {
-    setState(() {
-      _unreadCount = NotificationService.getUnreadCount();
-    });
+  Future<void> _loadUnreadCount() async {
+    if (_isLoading) return;
+    _isLoading = true;
+    
+    try {
+      final count = await ApiService.getUnreadNotificationCount();
+      if (mounted) {
+        setState(() => _unreadCount = count);
+      }
+    } catch (e) {
+      // استفاده از مقدار لوکال
+      if (mounted) {
+        setState(() => _unreadCount = NotificationService.getUnreadCount());
+      }
+    }
+    
+    _isLoading = false;
   }
 
   @override
@@ -60,18 +75,18 @@ class _NotificationBadgeState extends State<NotificationBadge> {
               right: 0,
               top: 0,
               child: Container(
-                padding: EdgeInsets.all(4),
-                decoration: BoxDecoration(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(
                   color: Colors.red,
                   shape: BoxShape.circle,
                 ),
-                constraints: BoxConstraints(
+                constraints: const BoxConstraints(
                   minWidth: 18,
                   minHeight: 18,
                 ),
                 child: Text(
                   _unreadCount > 99 ? '99+' : '$_unreadCount',
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
@@ -86,10 +101,10 @@ class _NotificationBadgeState extends State<NotificationBadge> {
         await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => NotificationsScreen(),
+            builder: (_) => const NotificationsScreen(),
           ),
         );
-        _updateCount();
+        _loadUnreadCount();
       },
     );
   }

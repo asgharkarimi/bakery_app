@@ -1,34 +1,80 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const dotenv = require('dotenv');
 const http = require('http');
 const { Server } = require('socket.io');
+const rateLimit = require('express-rate-limit');
+const helmet = require('helmet');
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] }
+  cors: { 
+    origin: process.env.NODE_ENV === 'production' 
+      ? ['https://bakerjobs.ir', 'https://www.bakerjobs.ir'] 
+      : '*',
+    methods: ['GET', 'POST'] 
+  }
 });
 
 const { sequelize } = require('./models');
 
+// ساخت فولدرهای آپلود اگه وجود ندارن
+const uploadDirs = ['uploads', 'uploads/images', 'uploads/videos', 'uploads/chat'];
+uploadDirs.forEach(dir => {
+  const fullPath = path.join(__dirname, dir);
+  if (!fs.existsSync(fullPath)) {
+    fs.mkdirSync(fullPath, { recursive: true });
+    console.log(`📁 Created directory: ${dir}`);
+  }
+});
+
 // ذخیره کاربران آنلاین
 const onlineUsers = new Map();
 
+// Security Middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Rate Limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 دقیقه
+  max: 100, // حداکثر 100 درخواست
+  message: { success: false, message: 'تعداد درخواست‌ها بیش از حد مجاز است' }
+});
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 دقیقه
+  max: 10, // حداکثر 10 تلاش برای ورود
+  message: { success: false, message: 'تعداد تلاش‌های ورود بیش از حد مجاز است' }
+});
+
 // Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://bakerjobs.ir', 'https://www.bakerjobs.ir'] 
+    : '*'
+}));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(limiter);
 
 // Static files
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/admin', express.static(path.join(__dirname, 'public/admin')));
 
+// Admin panel route - redirect /admin to /admin/index.html
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/admin/index.html'));
+});
+
 // API Routes
-app.use('/api/auth', require('./routes/auth'));
+app.use('/api/auth', authLimiter, require('./routes/auth'));
 app.use('/api/job-ads', require('./routes/jobAds'));
 app.use('/api/job-seekers', require('./routes/jobSeekers'));
 app.use('/api/bakery-ads', require('./routes/bakeryAds'));
@@ -122,7 +168,7 @@ const PORT = process.env.PORT || 3000;
 sequelize.authenticate()
   .then(() => {
     console.log('✅ اتصال به MySQL برقرار شد');
-    return sequelize.sync({ alter: true });
+    return sequelize.sync();
   })
   .then(() => {
     console.log('✅ جداول دیتابیس همگام‌سازی شدند');

@@ -3,6 +3,7 @@ import '../../models/bakery_ad.dart';
 import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/empty_state_widget.dart';
+import '../map/bakeries_map_screen.dart';
 import 'bakery_detail_screen.dart';
 import 'add_bakery_ad_screen.dart';
 
@@ -44,7 +45,19 @@ class _BakeryListScreenState extends State<BakeryListScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: Text('خرید و فروش نانوایی'),
+          title: const Text('خرید و فروش نانوایی'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.map),
+              tooltip: 'نمایش روی نقشه',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BakeriesMapScreen()),
+                );
+              },
+            ),
+          ],
         ),
         body: _isLoading
             ? Center(child: CircularProgressIndicator())

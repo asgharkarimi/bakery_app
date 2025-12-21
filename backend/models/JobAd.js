@@ -43,6 +43,26 @@ const JobAd = sequelize.define('JobAd', {
   description: {
     type: DataTypes.TEXT
   },
+  hasInsurance: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'has_insurance'
+  },
+  hasAccommodation: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'has_accommodation'
+  },
+  hasVacation: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'has_vacation'
+  },
+  vacationDays: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    field: 'vacation_days'
+  },
   images: {
     type: DataTypes.JSON,
     defaultValue: []

@@ -136,7 +136,7 @@ class _AddBakeryAdScreenState extends State<AddBakeryAdScreen> {
         if (success) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('آگهی با موفقیت ثبت شد و پس از تایید منتشر می‌شود'),
+              content: Text('آگهی شما با موفقیت ثبت شد و پس از تایید مدیر منتشر خواهد شد'),
               backgroundColor: AppTheme.primaryGreen,
             ),
           );

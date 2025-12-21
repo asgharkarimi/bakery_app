@@ -280,12 +280,20 @@ router.post('/send', auth, async (req, res) => {
 // ارسال فایل (عکس/ویدیو/صدا)
 router.post('/send-media', auth, upload.single('file'), async (req, res) => {
   try {
-    console.log('📎 آپلود مدیا:', req.body, 'فایل:', req.file?.filename);
+    console.log('📎 آپلود مدیا - body:', req.body);
+    console.log('📎 آپلود مدیا - file:', req.file);
+    console.log('📎 آپلود مدیا - userId:', req.userId);
+    
     const { receiverId, messageType, replyToId, message } = req.body;
     
     if (!req.file) {
-      console.log('❌ فایل ارسال نشده');
+      console.log('❌ فایل ارسال نشده - headers:', req.headers);
       return res.status(400).json({ success: false, message: 'فایل ارسال نشده' });
+    }
+    
+    if (!receiverId) {
+      console.log('❌ receiverId ارسال نشده');
+      return res.status(400).json({ success: false, message: 'receiverId ارسال نشده' });
     }
 
     const isBlocked = await BlockedUser.findOne({
@@ -311,10 +319,166 @@ router.post('/send-media', auth, upload.single('file'), async (req, res) => {
       include: [{ model: Chat, as: 'replyTo', attributes: ['id', 'message', 'senderId', 'messageType'] }]
     });
 
+    // ارسال پیام از طریق WebSocket
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const receiverSocket = onlineUsers.get(Number(receiverId));
+    
+    if (receiverSocket && io) {
+      io.to(receiverSocket).emit('newMessage', {
+        ...fullChat.toJSON(),
+        senderId: req.userId
+      });
+      console.log('🔌 مدیا از طریق WebSocket ارسال شد');
+    }
+
     console.log('✅ مدیا آپلود شد:', fullChat.id, fullChat.mediaUrl);
     res.status(201).json({ success: true, data: fullChat });
   } catch (error) {
-    console.error('❌ خطا در آپلود مدیا:', error.message);
+    console.error('❌ خطا در آپلود مدیا:', error);
+    console.error('❌ Stack:', error.stack);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// ویرایش پیام
+router.put('/message/:messageId', auth, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { message } = req.body;
+    
+    const chat = await Chat.findByPk(messageId);
+    if (!chat) {
+      return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    }
+    
+    // فقط فرستنده میتونه ویرایش کنه
+    if (chat.senderId !== req.userId) {
+      return res.status(403).json({ success: false, message: 'شما اجازه ویرایش این پیام را ندارید' });
+    }
+    
+    // فقط پیام متنی قابل ویرایشه
+    if (chat.messageType !== 'text') {
+      return res.status(400).json({ success: false, message: 'فقط پیام‌های متنی قابل ویرایش هستند' });
+    }
+    
+    await chat.update({ message, isEdited: true });
+    
+    // اطلاع‌رسانی از طریق WebSocket
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const receiverSocket = onlineUsers.get(chat.receiverId);
+    
+    if (receiverSocket && io) {
+      io.to(receiverSocket).emit('messageEdited', {
+        messageId: chat.id,
+        message,
+        isEdited: true
+      });
+    }
+    
+    res.json({ success: true, data: chat });
+  } catch (error) {
+    console.error('❌ خطا در ویرایش پیام:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// حذف پیام
+router.delete('/message/:messageId', auth, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    
+    const chat = await Chat.findByPk(messageId);
+    if (!chat) {
+      return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    }
+    
+    // فقط فرستنده میتونه حذف کنه
+    if (chat.senderId !== req.userId) {
+      return res.status(403).json({ success: false, message: 'شما اجازه حذف این پیام را ندارید' });
+    }
+    
+    await chat.update({ isDeleted: true, message: 'این پیام حذف شده است' });
+    
+    // اطلاع‌رسانی از طریق WebSocket
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const receiverSocket = onlineUsers.get(chat.receiverId);
+    
+    if (receiverSocket && io) {
+      io.to(receiverSocket).emit('messageDeleted', {
+        messageId: chat.id
+      });
+    }
+    
+    res.json({ success: true, message: 'پیام حذف شد' });
+  } catch (error) {
+    console.error('❌ خطا در حذف پیام:', error.message);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// علامت‌گذاری پیام به عنوان تحویل داده شده
+router.put('/delivered/:messageId', auth, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    
+    const chat = await Chat.findByPk(messageId);
+    if (!chat) {
+      return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    }
+    
+    // فقط گیرنده میتونه تحویل رو تایید کنه
+    if (chat.receiverId !== req.userId) {
+      return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز' });
+    }
+    
+    await chat.update({ isDelivered: true });
+    
+    // اطلاع‌رسانی به فرستنده
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const senderSocket = onlineUsers.get(chat.senderId);
+    
+    if (senderSocket && io) {
+      io.to(senderSocket).emit('messageDelivered', { messageId: chat.id });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+// علامت‌گذاری پیام به عنوان خوانده شده
+router.put('/read/:messageId', auth, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    
+    const chat = await Chat.findByPk(messageId);
+    if (!chat) {
+      return res.status(404).json({ success: false, message: 'پیام یافت نشد' });
+    }
+    
+    // فقط گیرنده میتونه خوانده شدن رو تایید کنه
+    if (chat.receiverId !== req.userId) {
+      return res.status(403).json({ success: false, message: 'دسترسی غیرمجاز' });
+    }
+    
+    await chat.update({ isRead: true, isDelivered: true });
+    
+    // اطلاع‌رسانی به فرستنده
+    const io = req.app.get('io');
+    const onlineUsers = req.app.get('onlineUsers');
+    const senderSocket = onlineUsers.get(chat.senderId);
+    
+    if (senderSocket && io) {
+      io.to(senderSocket).emit('messageRead', { messageId: chat.id });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });

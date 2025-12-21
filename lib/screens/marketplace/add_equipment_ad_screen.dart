@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/currency_input_formatter.dart';
 import '../../utils/number_to_words.dart';
@@ -20,7 +23,10 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
   final _descriptionController = TextEditingController();
   final _priceController = TextEditingController();
   final _phoneController = TextEditingController();
-  String? _selectedLocation;
+  final _locationController = TextEditingController();
+  LatLng? _selectedLatLng;
+  String? _selectedAddress;
+  bool _isLoadingAddress = false;
   String _priceWords = '';
   final List<File> _selectedImages = [];
   final ImagePicker _picker = ImagePicker();
@@ -31,13 +37,41 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
     _descriptionController.dispose();
     _priceController.dispose();
     _phoneController.dispose();
+    _locationController.dispose();
     super.dispose();
+  }
+
+  // دریافت آدرس از مختصات با Nominatim
+  Future<String?> _getAddressFromLatLng(LatLng latLng) async {
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=${latLng.latitude}&lon=${latLng.longitude}&accept-language=fa',
+      );
+      final response = await http.get(url, headers: {
+        'User-Agent': 'BakeryApp/1.0',
+      });
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final address = data['address'];
+        final parts = <String>[];
+        if (address['state'] != null) parts.add(address['state']);
+        if (address['county'] != null) parts.add(address['county']);
+        if (address['city'] != null) parts.add(address['city']);
+        if (address['suburb'] != null) parts.add(address['suburb']);
+        if (address['neighbourhood'] != null) parts.add(address['neighbourhood']);
+        if (address['road'] != null) parts.add(address['road']);
+        return parts.isNotEmpty ? parts.join('، ') : data['display_name'];
+      }
+    } catch (e) {
+      debugPrint('Error getting address: $e');
+    }
+    return null;
   }
 
   void _submitAd() {
     if (_formKey.currentState!.validate()) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('آگهی با موفقیت ثبت شد')),
+        SnackBar(content: Text('آگهی شما با موفقیت ثبت شد و پس از تایید مدیر منتشر خواهد شد')),
       );
       Navigator.pop(context);
     }
@@ -99,33 +133,48 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
               SizedBox(height: 16),
               TextFormField(
                 readOnly: true,
+                controller: _locationController,
                 decoration: InputDecoration(
                   labelText: 'محل',
                   hintText: 'انتخاب از روی نقشه',
-                  prefixIcon: Icon(Icons.location_on, color: AppTheme.primaryGreen),
+                  prefixIcon: _isLoadingAddress
+                      ? Padding(
+                          padding: EdgeInsets.all(12),
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        )
+                      : Icon(Icons.location_on, color: AppTheme.primaryGreen),
                   suffixIcon: Icon(Icons.map, color: AppTheme.primaryGreen),
                 ),
-                controller: TextEditingController(text: _selectedLocation),
                 onTap: () async {
                   final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => LocationPickerScreen(),
+                      builder: (_) => LocationPickerScreen(
+                        initialLocation: _selectedLatLng,
+                      ),
                     ),
                   );
-                  if (result != null && mounted) {
+                  if (result != null && result is LatLng && mounted) {
                     setState(() {
-                      _selectedLocation = result.toString();
+                      _selectedLatLng = result;
+                      _isLoadingAddress = true;
+                      _locationController.text = 'در حال دریافت آدرس...';
                     });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('موقعیت از نقشه انتخاب شد'),
-                        backgroundColor: AppTheme.primaryGreen,
-                      ),
-                    );
+                    final address = await _getAddressFromLatLng(result);
+                    if (mounted) {
+                      setState(() {
+                        _isLoadingAddress = false;
+                        _selectedAddress = address ?? 'موقعیت انتخاب شده';
+                        _locationController.text = _selectedAddress!;
+                      });
+                    }
                   }
                 },
-                validator: (v) => _selectedLocation == null ? 'محل را از روی نقشه انتخاب کنید' : null,
+                validator: (v) => _selectedLatLng == null ? 'محل را از روی نقشه انتخاب کنید' : null,
               ),
               SizedBox(height: 16),
               TextFormField(
@@ -137,18 +186,6 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
                 ),
                 validator: (v) =>
                     v?.isEmpty ?? true ? 'شماره تماس را وارد کنید' : null,
-              ),
-              SizedBox(height: 16),
-              TextFormField(
-                controller: _descriptionController,
-                maxLines: 5,
-                decoration: InputDecoration(
-                  labelText: 'توضیحات',
-                  prefixIcon: Icon(Icons.description),
-                  alignLabelWithHint: true,
-                ),
-                validator: (v) =>
-                    v?.isEmpty ?? true ? 'توضیحات را وارد کنید' : null,
               ),
               SizedBox(height: 16),
               // بخش عکس‌ها با placeholder
@@ -316,6 +353,18 @@ class _AddEquipmentAdScreenState extends State<AddEquipmentAdScreen> {
                 },
                 icon: Icon(Icons.video_library),
                 label: Text('افزودن ویدیو'),
+              ),
+              SizedBox(height: 16),
+              TextFormField(
+                controller: _descriptionController,
+                maxLines: 5,
+                decoration: InputDecoration(
+                  labelText: 'توضیحات',
+                  prefixIcon: Icon(Icons.description),
+                  alignLabelWithHint: true,
+                ),
+                validator: (v) =>
+                    v?.isEmpty ?? true ? 'توضیحات را وارد کنید' : null,
               ),
               SizedBox(height: 24),
               SizedBox(

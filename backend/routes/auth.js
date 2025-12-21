@@ -11,7 +11,7 @@ router.post('/send-code', async (req, res) => {
     // تبدیل اعداد فارسی به انگلیسی
     phone = convertPersianToEnglish(phone || '');
     
-    if (!phone || phone.length !== 11) {
+    if (!phone || phone.length !== 11 || !phone.startsWith('09')) {
       return res.status(400).json({ success: false, message: 'شماره موبایل نامعتبر است' });
     }
 
@@ -20,13 +20,25 @@ router.post('/send-code', async (req, res) => {
       user = await User.create({ phone });
     }
 
-    // کد پیش‌فرض 1234 (چون پنل پیامکی نداریم)
-    const code = '1234';
+    // تولید کد تصادفی 6 رقمی
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
     user.verificationCode = code;
     user.verificationExpires = new Date(Date.now() + 5 * 60 * 1000);
+    user.verificationAttempts = 0; // ریست تعداد تلاش‌ها
     await user.save();
 
-    res.json({ success: true, message: 'کد تایید ارسال شد (کد پیش‌فرض: 1234)' });
+    // TODO: ارسال SMS واقعی
+    // در محیط توسعه کد رو لاگ میکنیم
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`📱 کد تایید برای ${phone}: ${code}`);
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'کد تایید ارسال شد',
+      // فقط در محیط توسعه کد رو برگردون
+      ...(process.env.NODE_ENV === 'development' && { devCode: code })
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -58,19 +70,32 @@ router.post('/verify', async (req, res) => {
       return res.status(404).json({ success: false, message: 'کاربر یافت نشد' });
     }
 
-    // کد پیش‌فرض 1234 همیشه قبول میشه
-    if (code !== '1234' && user.verificationCode !== code) {
+    // چک کردن تعداد تلاش‌های ناموفق
+    if (user.verificationAttempts >= 5) {
+      return res.status(429).json({ success: false, message: 'تعداد تلاش‌ها بیش از حد مجاز است. لطفاً بعداً تلاش کنید.' });
+    }
+
+    // چک کردن انقضای کد
+    if (user.verificationExpires && new Date() > user.verificationExpires) {
+      return res.status(400).json({ success: false, message: 'کد تایید منقضی شده است' });
+    }
+
+    // چک کردن کد
+    if (user.verificationCode !== code) {
+      // افزایش تعداد تلاش‌های ناموفق
+      await user.increment('verificationAttempts');
       return res.status(400).json({ success: false, message: 'کد تایید نامعتبر است' });
     }
 
     user.verificationCode = null;
     user.verificationExpires = null;
+    user.verificationAttempts = 0;
     user.isVerified = true;
     await user.save();
 
     const token = jwt.sign(
       { userId: user.id },
-      process.env.JWT_SECRET || 'secret',
+      process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 

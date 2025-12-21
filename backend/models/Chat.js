@@ -36,6 +36,11 @@ const Chat = sequelize.define('Chat', {
     field: 'reply_to_id',
     references: { model: 'chats', key: 'id' }
   },
+  isDelivered: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_delivered'
+  },
   isRead: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
@@ -45,6 +50,16 @@ const Chat = sequelize.define('Chat', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
     field: 'is_encrypted'
+  },
+  isEdited: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_edited'
+  },
+  isDeleted: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    field: 'is_deleted'
   }
 }, {
   tableName: 'chats',

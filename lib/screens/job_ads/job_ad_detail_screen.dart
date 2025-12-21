@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../models/job_ad.dart';
 import '../../models/review.dart';
 import '../../theme/app_theme.dart';
@@ -24,6 +25,7 @@ class JobAdDetailScreen extends StatefulWidget {
 class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
   bool _isBookmarked = false;
   bool _isOwner = false;
+  bool _isLoggedIn = false;
   late JobAd _ad;
 
   @override
@@ -32,6 +34,22 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
     _ad = widget.ad;
     _checkBookmark();
     _checkOwnership();
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    final loggedIn = await ApiService.isLoggedIn();
+    if (mounted) {
+      setState(() => _isLoggedIn = loggedIn);
+    }
+  }
+
+  Future<void> _refreshData() async {
+    final refreshedAd = await ApiService.getJobAdById(_ad.id);
+    if (refreshedAd != null && mounted) {
+      setState(() => _ad = refreshedAd);
+    }
+    await _checkBookmark();
   }
 
   Future<void> _checkOwnership() async {
@@ -46,6 +64,23 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
     if (mounted) {
       setState(() => _isBookmarked = isBookmarked);
     }
+  }
+
+  void _shareAd() {
+    final shareText = '''
+🔔 آگهی استخدام نانوایی
+
+📌 ${_ad.title}
+💼 تخصص: ${_ad.category}
+📍 محل کار: ${_ad.location}
+💰 حقوق هفتگی: ${NumberFormatter.formatPrice(_ad.salary)}
+📞 تماس: ${_ad.phoneNumber}
+
+${_ad.description.isNotEmpty ? '📝 توضیحات: ${_ad.description}' : ''}
+
+📱 اپلیکیشن کاریابی نانوایی
+''';
+    Share.share(shareText.trim(), subject: _ad.title);
   }
 
   Future<void> _toggleBookmark() async {
@@ -72,8 +107,11 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        body: CustomScrollView(
-          slivers: [
+        body: RefreshIndicator(
+          onRefresh: _refreshData,
+          color: AppTheme.primaryGreen,
+          child: CustomScrollView(
+            slivers: [
             // هدر با گرادیانت
             SliverAppBar(
               expandedHeight: 280,
@@ -154,6 +192,9 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
                         // کارت حقوق
                         _buildSalaryCard(),
                         const SizedBox(height: 16),
+                        // امکانات
+                        _buildFacilitiesCard(),
+                        const SizedBox(height: 16),
                         // توضیحات
                         if (_ad.description.isNotEmpty) ...[
                           _buildDescriptionCard(),
@@ -169,6 +210,7 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
               ),
             ),
           ],
+        ),
         ),
         // دکمه تماس ثابت
         bottomNavigationBar: _buildBottomBar(),
@@ -471,6 +513,117 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
     );
   }
 
+  Widget _buildFacilitiesCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.card_giftcard, color: Colors.teal, size: 24),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'امکانات و مزایا',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildFacilityItem(
+            icon: Icons.health_and_safety,
+            label: 'بیمه تامین اجتماعی',
+            hasIt: _ad.hasInsurance,
+            color: Colors.green,
+          ),
+          _buildFacilityItem(
+            icon: Icons.hotel,
+            label: 'محل خواب',
+            hasIt: _ad.hasAccommodation,
+            color: Colors.blue,
+          ),
+          _buildFacilityItem(
+            icon: Icons.beach_access,
+            label: _ad.hasVacation && _ad.vacationDays > 0
+                ? 'تعطیلات (${_ad.vacationDays} روز در ماه)'
+                : 'تعطیلات',
+            hasIt: _ad.hasVacation,
+            color: Colors.orange,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFacilityItem({
+    required IconData icon,
+    required String label,
+    required bool hasIt,
+    required Color color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: (hasIt ? color : Colors.grey).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: hasIt ? color : Colors.grey, size: 20),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: hasIt ? AppTheme.textDark : AppTheme.textGrey,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: hasIt ? Colors.green.withValues(alpha: 0.1) : Colors.red.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              hasIt ? 'دارد' : 'ندارد',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: hasIt ? Colors.green : Colors.red,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDescriptionCard() {
     return Container(
       width: double.infinity,
@@ -548,14 +701,7 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
             icon: Icons.share_outlined,
             label: 'اشتراک',
             color: Colors.orange,
-            onTap: () {
-              Clipboard.setData(ClipboardData(
-                text: '${_ad.title}\nحقوق: ${NumberFormatter.formatPrice(_ad.salary)}\nتماس: ${_ad.phoneNumber}',
-              ));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('اطلاعات آگهی کپی شد'), backgroundColor: Colors.green),
-              );
-            },
+            onTap: () => _shareAd(),
           ),
         ),
       ],
@@ -629,6 +775,12 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: () {
+                  if (!_isLoggedIn) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('برای ارسال پیام ابتدا وارد شوید')),
+                    );
+                    return;
+                  }
                   debugPrint('🔍 JobAd userId: "${_ad.userId}", userName: "${_ad.userName}"');
                   if (_ad.userId.isEmpty || _ad.userId == '0' || _ad.userId == 'null') {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -661,14 +813,20 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
               ),
             ),
             const SizedBox(width: 12),
-            // دکمه تماس
+            // دکمه تماس - فقط برای کاربران لاگین شده
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: AppTheme.primaryGreen, width: 2),
+                border: Border.all(color: _isLoggedIn ? AppTheme.primaryGreen : Colors.grey, width: 2),
                 borderRadius: BorderRadius.circular(14),
               ),
               child: IconButton(
                 onPressed: () {
+                  if (!_isLoggedIn) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('برای مشاهده شماره تماس ابتدا وارد شوید')),
+                    );
+                    return;
+                  }
                   Clipboard.setData(ClipboardData(text: _ad.phoneNumber));
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
@@ -677,7 +835,7 @@ class _JobAdDetailScreenState extends State<JobAdDetailScreen> {
                     ),
                   );
                 },
-                icon: Icon(Icons.phone, color: AppTheme.primaryGreen),
+                icon: Icon(Icons.phone, color: _isLoggedIn ? AppTheme.primaryGreen : Colors.grey),
                 padding: const EdgeInsets.all(12),
               ),
             ),

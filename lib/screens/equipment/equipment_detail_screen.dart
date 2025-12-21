@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../models/equipment_ad.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
@@ -21,6 +22,7 @@ class EquipmentDetailScreen extends StatefulWidget {
 class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
   bool _isBookmarked = false;
   bool _isOwner = false;
+  bool _isLoggedIn = false;
   late EquipmentAd _ad;
 
   @override
@@ -29,6 +31,18 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
     _ad = widget.ad;
     _checkBookmark();
     _checkOwnership();
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    final loggedIn = await ApiService.isLoggedIn();
+    if (mounted) {
+      setState(() => _isLoggedIn = loggedIn);
+    }
+  }
+
+  Future<void> _refreshData() async {
+    await _checkBookmark();
   }
   
   Future<void> _checkOwnership() async {
@@ -68,6 +82,23 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
     });
   }
 
+  void _shareAd() {
+    final shareText = '''
+🔧 آگهی تجهیزات نانوایی
+
+📌 ${_ad.title}
+💰 قیمت: ${NumberFormatter.formatPrice(_ad.price)}
+📦 وضعیت: ${_ad.condition == 'new' ? 'نو' : 'کارکرده'}
+📍 آدرس: ${_ad.location}
+📞 تماس: ${_ad.phoneNumber}
+
+${_ad.description.isNotEmpty ? '📝 توضیحات: ${_ad.description}' : ''}
+
+📱 اپلیکیشن کاریابی نانوایی
+''';
+    Share.share(shareText.trim(), subject: _ad.title);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -103,10 +134,18 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
               ),
               onPressed: _toggleBookmark,
             ),
+            IconButton(
+              icon: const Icon(Icons.share),
+              onPressed: _shareAd,
+            ),
           ],
         ),
-        body: SingleChildScrollView(
-          child: Column(
+        body: RefreshIndicator(
+          onRefresh: _refreshData,
+          color: AppTheme.primaryGreen,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
             children: [
               Container(
                 margin: EdgeInsets.all(16),
@@ -166,7 +205,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                     _buildInfoRow(
                       icon: Icons.phone,
                       label: 'تماس',
-                      value: _ad.phoneNumber,
+                      value: _isLoggedIn ? _ad.phoneNumber : '***********',
                       iconColor: Color(0xFF1976D2),
                     ),
                   ],
@@ -217,6 +256,12 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                   height: 56,
                   child: ElevatedButton(
                     onPressed: () {
+                      if (!_isLoggedIn) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('برای مشاهده شماره تماس ابتدا وارد شوید')),
+                        );
+                        return;
+                      }
                       Clipboard.setData(ClipboardData(text: _ad.phoneNumber));
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -227,7 +272,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Color(0xFF1976D2),
+                      backgroundColor: _isLoggedIn ? Color(0xFF1976D2) : Colors.grey,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -238,7 +283,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
                         Icon(Icons.phone, color: AppTheme.white),
                         SizedBox(width: 8),
                         Text(
-                          'تماس با آگهی دهنده',
+                          _isLoggedIn ? 'تماس با آگهی دهنده' : 'برای تماس وارد شوید',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -294,6 +339,7 @@ class _EquipmentDetailScreenState extends State<EquipmentDetailScreen> {
               ),
             ],
           ),
+        ),
         ),
       ),
     );

@@ -6,6 +6,8 @@ import 'services/notification_service.dart';
 import 'services/cache_service.dart';
 import 'services/notification_manager.dart';
 import 'services/api_service.dart';
+import 'services/media_cache_service.dart';
+import 'widgets/cached_image.dart';
 
 // کلید گلوبال برای Navigator
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -13,11 +15,15 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // مقداردهی اولیه کش
-  await CacheService.init();
+  // مقداردهی اولیه همه کش‌ها به صورت موازی
+  await Future.wait([
+    CacheService.init(),
+    ImageCacheService.init(),
+    MediaCacheService.init(),
+  ]);
   
-  // بارگذاری نوتیفیکیشن‌های نمونه
-  NotificationService.loadSampleNotifications();
+  // بارگذاری نوتیفیکیشن‌ها از سرور (در پس‌زمینه - بدون await)
+  NotificationService.loadFromServer();
   
   // تنظیم callback برای نمایش پیام سرور در دسترس نیست
   ApiService.onServerUnavailable = _showServerUnavailableMessage;

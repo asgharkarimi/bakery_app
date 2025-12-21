@@ -1,3 +1,18 @@
+import 'dart:convert';
+
+List<String> _parseList(dynamic data) {
+  if (data == null) return [];
+  if (data is List) return List<String>.from(data);
+  if (data is String) {
+    if (data.isEmpty || data == '[]') return [];
+    try {
+      final parsed = jsonDecode(data);
+      if (parsed is List) return List<String>.from(parsed);
+    } catch (_) {}
+  }
+  return [];
+}
+
 class JobSeeker {
   final String id;
   final int? userId;
@@ -62,7 +77,7 @@ class JobSeeker {
       profileImage: profileImg,
       age: json['age'],
       experience: json['experience'] ?? 0,
-      skills: json['skills'] != null ? List<String>.from(json['skills']) : [],
+      skills: _parseList(json['skills']),
       location: json['location'] ?? '',
       expectedSalary: json['expectedSalary'] ?? json['expected_salary'] ?? 0,
       phoneNumber: json['phoneNumber'] ?? json['phone_number'],

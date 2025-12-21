@@ -55,7 +55,15 @@ router.get('/:id', async (req, res) => {
 // ثبت رزومه
 router.post('/', auth, async (req, res) => {
   try {
-    const seeker = await JobSeeker.create({ ...req.body, userId: req.userId });
+    // چک کردن اینکه کاربر ادمین هست یا نه
+    const user = await User.findByPk(req.userId);
+    const isAdmin = user && (user.role === 'admin' || user.phone === '09199541276');
+    
+    const seeker = await JobSeeker.create({ 
+      ...req.body, 
+      userId: req.userId,
+      isApproved: isAdmin
+    });
     res.status(201).json({ success: true, data: seeker });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

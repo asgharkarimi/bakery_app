@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import '../models/job_ad.dart';
-import '../models/bakery_ad.dart';
+import 'api_service.dart';
 
 class NotificationService {
   static final List<AppNotification> _notifications = [];
   static final List<Function(AppNotification)> _listeners = [];
+  static int _unreadCount = 0;
 
   // دریافت تمام نوتیفیکیشن‌ها
   static List<AppNotification> getAll() {
@@ -18,38 +18,81 @@ class NotificationService {
 
   // تعداد نوتیفیکیشن‌های خوانده نشده
   static int getUnreadCount() {
-    return _notifications.where((n) => !n.isRead).length;
+    return _unreadCount;
   }
 
-  // اضافه کردن نوتیفیکیشن جدید
+  // بارگذاری نوتیفیکیشن‌ها از سرور
+  static Future<void> loadFromServer() async {
+    try {
+      final response = await ApiService.getNotifications();
+      if (response['success'] == true) {
+        _notifications.clear();
+        final data = response['data'] as List? ?? [];
+        for (var item in data) {
+          _notifications.add(AppNotification.fromJson(item));
+        }
+        _unreadCount = response['unreadCount'] ?? 0;
+      }
+    } catch (e) {
+      debugPrint('Error loading notifications: $e');
+    }
+  }
+
+  // اضافه کردن نوتیفیکیشن جدید (لوکال)
   static void addNotification(AppNotification notification) {
     _notifications.insert(0, notification);
+    if (!notification.isRead) _unreadCount++;
     _notifyListeners(notification);
   }
 
   // علامت‌گذاری به عنوان خوانده شده
-  static void markAsRead(String id) {
-    final index = _notifications.indexWhere((n) => n.id == id);
-    if (index != -1) {
-      _notifications[index] = _notifications[index].copyWith(isRead: true);
+  static Future<void> markAsRead(String id) async {
+    try {
+      await ApiService.markNotificationAsRead(id);
+      final index = _notifications.indexWhere((n) => n.id == id);
+      if (index != -1 && !_notifications[index].isRead) {
+        _notifications[index] = _notifications[index].copyWith(isRead: true);
+        _unreadCount = (_unreadCount - 1).clamp(0, 999);
+      }
+    } catch (e) {
+      debugPrint('Error marking notification as read: $e');
     }
   }
 
   // علامت‌گذاری همه به عنوان خوانده شده
-  static void markAllAsRead() {
-    for (int i = 0; i < _notifications.length; i++) {
-      _notifications[i] = _notifications[i].copyWith(isRead: true);
+  static Future<void> markAllAsRead() async {
+    try {
+      await ApiService.markAllNotificationsAsRead();
+      for (int i = 0; i < _notifications.length; i++) {
+        _notifications[i] = _notifications[i].copyWith(isRead: true);
+      }
+      _unreadCount = 0;
+    } catch (e) {
+      debugPrint('Error marking all as read: $e');
     }
   }
 
   // حذف نوتیفیکیشن
-  static void remove(String id) {
-    _notifications.removeWhere((n) => n.id == id);
+  static Future<void> remove(String id) async {
+    try {
+      await ApiService.deleteNotification(id);
+      final notification = _notifications.firstWhere((n) => n.id == id, orElse: () => AppNotification.empty());
+      if (!notification.isRead) _unreadCount = (_unreadCount - 1).clamp(0, 999);
+      _notifications.removeWhere((n) => n.id == id);
+    } catch (e) {
+      debugPrint('Error removing notification: $e');
+    }
   }
 
   // پاک کردن همه
-  static void clearAll() {
-    _notifications.clear();
+  static Future<void> clearAll() async {
+    try {
+      await ApiService.deleteAllNotifications();
+      _notifications.clear();
+      _unreadCount = 0;
+    } catch (e) {
+      debugPrint('Error clearing notifications: $e');
+    }
   }
 
   // ثبت listener
@@ -69,75 +112,16 @@ class NotificationService {
     }
   }
 
-  // ایجاد نوتیفیکیشن برای آگهی شغلی جدید
-  static void notifyNewJobAd(JobAd ad) {
-    addNotification(AppNotification(
-      id: 'job_${ad.id}_${DateTime.now().millisecondsSinceEpoch}',
-      title: 'آگهی شغلی جدید',
-      body: ad.title,
-      type: NotificationType.newJobAd,
-      data: {'jobAdId': ad.id},
-      createdAt: DateTime.now(),
-    ));
-  }
-
-  // ایجاد نوتیفیکیشن برای آگهی نانوایی جدید
-  static void notifyNewBakeryAd(BakeryAd ad) {
-    addNotification(AppNotification(
-      id: 'bakery_${ad.id}_${DateTime.now().millisecondsSinceEpoch}',
-      title: 'آگهی نانوایی جدید',
-      body: ad.title,
-      type: NotificationType.newBakeryAd,
-      data: {'bakeryAdId': ad.id},
-      createdAt: DateTime.now(),
-    ));
-  }
-
-  // ایجاد نوتیفیکیشن سفارشی
-  static void notifyCustom({
-    required String title,
-    required String body,
-    NotificationType type = NotificationType.general,
-    Map<String, dynamic>? data,
-  }) {
-    addNotification(AppNotification(
-      id: 'custom_${DateTime.now().millisecondsSinceEpoch}',
-      title: title,
-      body: body,
-      type: type,
-      data: data,
-      createdAt: DateTime.now(),
-    ));
-  }
-
-  // شبیه‌سازی دریافت نوتیفیکیشن‌های نمونه
-  static void loadSampleNotifications() {
-    addNotification(AppNotification(
-      id: '1',
-      title: 'آگهی شغلی جدید',
-      body: 'نیازمند شاطر بربری در تهران',
-      type: NotificationType.newJobAd,
-      data: {'jobAdId': '1'},
-      createdAt: DateTime.now().subtract(Duration(minutes: 5)),
-    ));
-
-    addNotification(AppNotification(
-      id: '2',
-      title: 'آگهی نانوایی جدید',
-      body: 'فروش نانوایی بربری در اصفهان',
-      type: NotificationType.newBakeryAd,
-      data: {'bakeryAdId': '1'},
-      createdAt: DateTime.now().subtract(Duration(hours: 1)),
-      isRead: true,
-    ));
-
-    addNotification(AppNotification(
-      id: '3',
-      title: 'پیام جدید',
-      body: 'شما یک پیام جدید دارید',
-      type: NotificationType.newMessage,
-      createdAt: DateTime.now().subtract(Duration(hours: 2)),
-    ));
+  // رفرش تعداد خوانده نشده
+  static Future<void> refreshUnreadCount() async {
+    try {
+      final response = await ApiService.getNotifications(limit: 1);
+      if (response['success'] == true) {
+        _unreadCount = response['unreadCount'] ?? 0;
+      }
+    } catch (e) {
+      debugPrint('Error refreshing unread count: $e');
+    }
   }
 }
 
@@ -160,6 +144,38 @@ class AppNotification {
     required this.createdAt,
     this.isRead = false,
   });
+
+  factory AppNotification.empty() => AppNotification(
+    id: '',
+    title: '',
+    body: '',
+    type: NotificationType.general,
+    createdAt: DateTime.now(),
+  );
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) {
+    return AppNotification(
+      id: json['id']?.toString() ?? '',
+      title: json['title'] ?? '',
+      body: json['body'] ?? json['message'] ?? '',
+      type: _parseType(json['type']),
+      data: json['data'] is Map ? Map<String, dynamic>.from(json['data']) : null,
+      createdAt: json['createdAt'] != null 
+          ? DateTime.tryParse(json['createdAt'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      isRead: json['isRead'] == true || json['is_read'] == true,
+    );
+  }
+
+  static NotificationType _parseType(dynamic type) {
+    if (type == null) return NotificationType.general;
+    final typeStr = type.toString().toLowerCase();
+    if (typeStr.contains('job')) return NotificationType.newJobAd;
+    if (typeStr.contains('bakery')) return NotificationType.newBakeryAd;
+    if (typeStr.contains('message') || typeStr.contains('chat')) return NotificationType.newMessage;
+    if (typeStr.contains('review')) return NotificationType.newReview;
+    return NotificationType.general;
+  }
 
   AppNotification copyWith({
     String? id,

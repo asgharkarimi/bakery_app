@@ -3,10 +3,11 @@ import '../../models/job_seeker.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
 import '../../utils/time_ago.dart';
-import '../../widgets/filter_bottom_sheet.dart';
+import '../../widgets/time_filter_bottom_sheet.dart';
 import '../../widgets/add_menu_fab.dart';
 import '../../widgets/empty_state_widget.dart';
 import '../../widgets/shimmer_loading.dart';
+import '../../widgets/cached_image.dart';
 import '../../services/api_service.dart';
 import 'job_seeker_detail_screen.dart';
 
@@ -17,7 +18,7 @@ class JobSeekersListScreen extends StatefulWidget {
   State<JobSeekersListScreen> createState() => _JobSeekersListScreenState();
 }
 
-class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
+class _JobSeekersListScreenState extends State<JobSeekersListScreen> with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
   final List<JobSeeker> _seekers = [];
   
@@ -26,7 +27,10 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
   bool _isLoadingMore = false;
   bool _hasMore = true;
   String? _selectedProvince;
-  RangeValues? _priceRange;
+  TimeFilter? _selectedTimeFilter;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -61,11 +65,10 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
       final seekers = await ApiService.getJobSeekers(
         page: 1,
         location: _selectedProvince,
-        maxSalary: _priceRange?.end.toInt(),
       );
       if (mounted) {
         setState(() {
-          _seekers.addAll(seekers);
+          _seekers.addAll(_filterByTime(seekers));
           _currentPage = 2;
           _hasMore = seekers.length >= 20;
           _isLoading = false;
@@ -84,11 +87,10 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
       final seekers = await ApiService.getJobSeekers(
         page: _currentPage,
         location: _selectedProvince,
-        maxSalary: _priceRange?.end.toInt(),
       );
       if (mounted) {
         setState(() {
-          _seekers.addAll(seekers);
+          _seekers.addAll(_filterByTime(seekers));
           _currentPage++;
           _hasMore = seekers.length >= 20;
           _isLoadingMore = false;
@@ -99,8 +101,35 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
     }
   }
 
+  List<JobSeeker> _filterByTime(List<JobSeeker> seekers) {
+    if (_selectedTimeFilter == null || _selectedTimeFilter == TimeFilter.all) {
+      return seekers;
+    }
+    
+    final now = DateTime.now();
+    return seekers.where((seeker) {
+      switch (_selectedTimeFilter!) {
+        case TimeFilter.today:
+          return seeker.createdAt.day == now.day && 
+                 seeker.createdAt.month == now.month && 
+                 seeker.createdAt.year == now.year;
+        case TimeFilter.yesterday:
+          final yesterday = now.subtract(const Duration(days: 1));
+          return seeker.createdAt.day == yesterday.day && 
+                 seeker.createdAt.month == yesterday.month;
+        case TimeFilter.lastWeek:
+          return seeker.createdAt.isAfter(now.subtract(const Duration(days: 7)));
+        case TimeFilter.lastMonth:
+          return seeker.createdAt.isAfter(now.subtract(const Duration(days: 30)));
+        case TimeFilter.all:
+          return true;
+      }
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
@@ -113,13 +142,13 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
                 showModalBottomSheet(
                   context: context,
                   isScrollControlled: true,
-                  builder: (context) => FilterBottomSheet(
+                  builder: (context) => TimeFilterBottomSheet(
                     selectedProvince: _selectedProvince,
-                    priceRange: _priceRange,
-                    onApply: (province, priceRange) {
+                    selectedTimeFilter: _selectedTimeFilter,
+                    onApply: (province, timeFilter) {
                       setState(() {
                         _selectedProvince = province;
-                        _priceRange = priceRange;
+                        _selectedTimeFilter = timeFilter;
                       });
                       _loadSeekers();
                     },
@@ -129,7 +158,8 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
               icon: Stack(
                 children: [
                   const Icon(Icons.filter_list),
-                  if (_selectedProvince != null || _priceRange != null)
+                  if (_selectedProvince != null || 
+                      (_selectedTimeFilter != null && _selectedTimeFilter != TimeFilter.all))
                     Positioned(
                       right: 0, top: 0,
                       child: Container(
@@ -219,16 +249,13 @@ class _JobSeekersListScreenState extends State<JobSeekersListScreen> {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(
+                    CachedAvatar(
+                      imageUrl: seeker.profileImage != null
+                          ? '${ApiService.serverUrl}${seeker.profileImage}'
+                          : null,
                       radius: 30,
+                      name: seeker.name,
                       backgroundColor: AppTheme.primaryGreen,
-                      backgroundImage: seeker.profileImage != null
-                          ? NetworkImage('http://10.0.2.2:3000${seeker.profileImage}')
-                          : null,
-                      child: seeker.profileImage == null
-                          ? Text(seeker.name.isNotEmpty ? seeker.name[0] : '?',
-                              style: TextStyle(color: AppTheme.white, fontSize: 24, fontWeight: FontWeight.bold))
-                          : null,
                     ),
                     const SizedBox(width: 12),
                     Expanded(

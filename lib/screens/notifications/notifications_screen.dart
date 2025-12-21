@@ -13,6 +13,8 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   List<AppNotification> _notifications = [];
+  bool _isLoading = true;
+  int _unreadCount = 0;
 
   @override
   void initState() {
@@ -20,31 +22,37 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _loadNotifications();
   }
 
-  void _loadNotifications() {
-    setState(() {
-      _notifications = NotificationService.getAll();
-    });
+  Future<void> _loadNotifications() async {
+    setState(() => _isLoading = true);
+    
+    await NotificationService.loadFromServer();
+    
+    if (mounted) {
+      setState(() {
+        _notifications = NotificationService.getAll();
+        _unreadCount = NotificationService.getUnreadCount();
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final unreadCount = NotificationService.getUnreadCount();
-
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: AppTheme.background,
         appBar: AppBar(
-          title: Text('اعلان‌ها'),
+          title: const Text('اعلان‌ها'),
           leading: IconButton(
-            icon: Icon(Icons.arrow_back),
+            icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.pop(context),
           ),
           actions: [
-            if (unreadCount > 0)
+            if (_unreadCount > 0)
               TextButton(
-                onPressed: () {
-                  NotificationService.markAllAsRead();
+                onPressed: () async {
+                  await NotificationService.markAllAsRead();
                   _loadNotifications();
                 },
                 child: Text(
@@ -59,7 +67,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 }
               },
               itemBuilder: (context) => [
-                PopupMenuItem(
+                const PopupMenuItem(
                   value: 'clear',
                   child: Row(
                     children: [
@@ -73,15 +81,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             ),
           ],
         ),
-        body: _notifications.isEmpty
-            ? _buildEmptyState()
-            : ListView.builder(
-                padding: context.responsive.padding(all: 16),
-                itemCount: _notifications.length,
-                itemBuilder: (context, index) {
-                  return _buildNotificationItem(_notifications[index]);
-                },
-              ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _notifications.isEmpty
+                ? _buildEmptyState()
+                : RefreshIndicator(
+                    onRefresh: _loadNotifications,
+                    child: ListView.builder(
+                      padding: context.responsive.padding(all: 16),
+                      itemCount: _notifications.length,
+                      itemBuilder: (context, index) {
+                        return _buildNotificationItem(_notifications[index]);
+                      },
+                    ),
+                  ),
       ),
     );
   }
@@ -115,38 +128,31 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       direction: DismissDirection.endToStart,
       background: Container(
         alignment: Alignment.centerLeft,
-        padding: EdgeInsets.only(left: 20),
+        padding: const EdgeInsets.only(left: 20),
         decoration: BoxDecoration(
           color: Colors.red,
           borderRadius: BorderRadius.circular(
             context.responsive.borderRadius(12),
           ),
         ),
-        child: Icon(Icons.delete, color: Colors.white),
+        child: const Icon(Icons.delete, color: Colors.white),
       ),
-      onDismissed: (direction) {
-        NotificationService.remove(notification.id);
+      onDismissed: (direction) async {
+        await NotificationService.remove(notification.id);
         _loadNotifications();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('اعلان حذف شد'),
-            action: SnackBarAction(
-              label: 'بازگردانی',
-              onPressed: () {
-                NotificationService.addNotification(notification);
-                _loadNotifications();
-              },
-            ),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('اعلان حذف شد')),
+          );
+        }
       },
       child: Card(
         margin: EdgeInsets.only(bottom: context.responsive.spacing(12)),
-        color: notification.isRead ? Colors.white : AppTheme.primaryGreen.withOpacity(0.05),
+        color: notification.isRead ? Colors.white : AppTheme.primaryGreen.withValues(alpha: 0.05),
         child: InkWell(
-          onTap: () {
+          onTap: () async {
             if (!notification.isRead) {
-              NotificationService.markAsRead(notification.id);
+              await NotificationService.markAsRead(notification.id);
               _loadNotifications();
             }
             _handleNotificationTap(notification);
@@ -162,7 +168,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 Container(
                   padding: EdgeInsets.all(context.responsive.spacing(12)),
                   decoration: BoxDecoration(
-                    color: notification.color.withOpacity(0.1),
+                    color: notification.color.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(
                       context.responsive.borderRadius(12),
                     ),
@@ -234,21 +240,18 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     // اینجا می‌تونی به صفحه مربوطه هدایت کنی
     switch (notification.type) {
       case NotificationType.newJobAd:
-        // Navigator.push به صفحه جزئیات آگهی
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('باز کردن آگهی شغلی...')),
+          const SnackBar(content: Text('باز کردن آگهی شغلی...')),
         );
         break;
       case NotificationType.newBakeryAd:
-        // Navigator.push به صفحه جزئیات نانوایی
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('باز کردن آگهی نانوایی...')),
+          const SnackBar(content: Text('باز کردن آگهی نانوایی...')),
         );
         break;
       case NotificationType.newMessage:
-        // Navigator.push به صفحه چت
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('باز کردن پیام...')),
+          const SnackBar(content: Text('باز کردن پیام...')),
         );
         break;
       default:
@@ -262,20 +265,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       builder: (context) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
-          title: Text('پاک کردن همه اعلان‌ها'),
-          content: Text('آیا مطمئن هستید که می‌خواهید همه اعلان‌ها را پاک کنید؟'),
+          title: const Text('پاک کردن همه اعلان‌ها'),
+          content: const Text('آیا مطمئن هستید که می‌خواهید همه اعلان‌ها را پاک کنید؟'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('انصراف'),
+              child: const Text('انصراف'),
             ),
             TextButton(
-              onPressed: () {
-                NotificationService.clearAll();
+              onPressed: () async {
+                await NotificationService.clearAll();
                 _loadNotifications();
-                Navigator.pop(context);
+                if (mounted) Navigator.pop(context);
               },
-              child: Text('پاک کردن', style: TextStyle(color: Colors.red)),
+              child: const Text('پاک کردن', style: TextStyle(color: Colors.red)),
             ),
           ],
         ),

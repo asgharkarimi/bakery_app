@@ -134,6 +134,21 @@ class CacheService {
     return data?.cast<Map<String, dynamic>>();
   }
 
+  /// کش کردن پیام‌های چت برای هر کاربر
+  static Future<bool> cacheChatMessages(int recipientId, List<Map<String, dynamic>> messages) async {
+    return await set('chat_messages_$recipientId', messages, expiry: const Duration(minutes: 10));
+  }
+
+  static Future<List<Map<String, dynamic>>?> getChatMessages(int recipientId) async {
+    final data = await get<List>('chat_messages_$recipientId', ignoreExpiry: true);
+    return data?.cast<Map<String, dynamic>>();
+  }
+
+  /// پاک کردن کش پیام‌های یک چت
+  static Future<bool> clearChatMessages(int recipientId) async {
+    return await remove('chat_messages_$recipientId');
+  }
+
   /// گرفتن سایز کش
   static Future<String> getCacheSize() async {
     await init();

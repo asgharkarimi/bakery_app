@@ -786,7 +786,7 @@ class _MarketplaceScreenState extends State<MarketplaceScreen>
               borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
               child: ad.images.isNotEmpty
                   ? Image.network(
-                      ad.images.first.startsWith('http') ? ad.images.first : 'http://10.0.2.2:3000${ad.images.first}',
+                      ad.images.first.startsWith('http') ? ad.images.first : '${ApiService.serverUrl}${ad.images.first}',
                       height: 160,
                       width: double.infinity,
                       fit: BoxFit.cover,

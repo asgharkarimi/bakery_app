@@ -13,11 +13,15 @@ class SocketService {
   static Function(int)? onUserTyping;
   static Function()? onConnected;
   static Function()? onDisconnected;
+  static Function(int)? onMessageDelivered;
+  static Function(int)? onMessageRead;
+  static Function(int, String)? onMessageEdited;
+  static Function(int)? onMessageDeleted;
   
   // Callback برای نمایش اعلان (از بیرون تنظیم میشه)
   static Function(Map<String, dynamic>)? onShowNotification;
 
-  static const String _serverUrl = 'http://10.0.2.2:3000';
+  static const String _serverUrl = 'https://bakerjobs.ir';
 
   /// اتصال به سرور
   static void connect(int userId) {
@@ -56,6 +60,43 @@ class SocketService {
       final senderId = data['senderId'];
       if (senderId != null) {
         onUserTyping?.call(senderId);
+      }
+    });
+
+    // وضعیت تحویل پیام
+    _socket!.on('messageDelivered', (data) {
+      debugPrint('✅ Message delivered: $data');
+      final messageId = data['messageId'];
+      if (messageId != null) {
+        onMessageDelivered?.call(messageId);
+      }
+    });
+
+    // وضعیت خوانده شدن پیام
+    _socket!.on('messageRead', (data) {
+      debugPrint('👁️ Message read: $data');
+      final messageId = data['messageId'];
+      if (messageId != null) {
+        onMessageRead?.call(messageId);
+      }
+    });
+
+    // ویرایش پیام
+    _socket!.on('messageEdited', (data) {
+      debugPrint('✏️ Message edited: $data');
+      final messageId = data['messageId'];
+      final message = data['message'];
+      if (messageId != null && message != null) {
+        onMessageEdited?.call(messageId, message);
+      }
+    });
+
+    // حذف پیام
+    _socket!.on('messageDeleted', (data) {
+      debugPrint('🗑️ Message deleted: $data');
+      final messageId = data['messageId'];
+      if (messageId != null) {
+        onMessageDeleted?.call(messageId);
       }
     });
 

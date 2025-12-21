@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/responsive.dart';
+import '../../services/preload_service.dart';
 import '../home/home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -14,6 +15,7 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<double> _scaleAnimation;
+  String _loadingText = 'در حال بارگذاری...';
 
   @override
   void initState() {
@@ -34,14 +36,30 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
     _controller.forward();
 
-    Future.delayed(Duration(seconds: 3), () {
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => HomeScreen()),
-        );
-      }
-    });
+    _initializeApp();
+  }
+
+  Future<void> _initializeApp() async {
+    // شروع پیش‌بارگذاری داده‌ها در پس‌زمینه
+    final preloadFuture = PreloadService.preloadAll();
+    
+    // حداقل 2 ثانیه صبر کن برای نمایش splash
+    final minDelay = Future.delayed(const Duration(seconds: 2));
+    
+    // آپدیت متن لودینگ
+    if (mounted) {
+      setState(() => _loadingText = 'در حال دریافت اطلاعات...');
+    }
+    
+    // صبر کن تا هر دو تموم بشن
+    await Future.wait([preloadFuture, minDelay]);
+    
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => HomeScreen()),
+      );
+    }
   }
 
   @override
@@ -129,6 +147,14 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     child: CircularProgressIndicator(
                       valueColor: AlwaysStoppedAnimation<Color>(AppTheme.white),
                       strokeWidth: 3,
+                    ),
+                  ),
+                  SizedBox(height: context.responsive.spacing(16)),
+                  Text(
+                    _loadingText,
+                    style: TextStyle(
+                      fontSize: context.responsive.fontSize(14),
+                      color: AppTheme.white.withValues(alpha: 0.8),
                     ),
                   ),
                 ],

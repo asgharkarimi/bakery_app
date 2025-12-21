@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
+import '../../services/media_cache_service.dart';
+import '../../services/user_cache_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/cached_image.dart';
 import '../auth/login_screen.dart';
 import '../bookmarks/bookmarks_screen.dart';
 import '../reviews/my_reviews_screen.dart';
@@ -39,8 +42,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _loadUserData() async {
-    final user = await ApiService.getCurrentUser();
+  Future<void> _loadUserData({bool forceRefresh = false}) async {
+    final user = await UserCacheService.getUser(forceRefresh: forceRefresh);
     if (mounted) {
       setState(() => _user = user);
     }
@@ -48,12 +51,241 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _logout() async {
     await ApiService.logout();
+    await UserCacheService.clearCache();
     if (mounted) {
       setState(() {
         _isLoggedIn = false;
         _user = null;
       });
     }
+  }
+
+  // برای refresh دستی (pull to refresh)
+  Future<void> _refreshUserData() async {
+    await _loadUserData(forceRefresh: true);
+  }
+
+  void _showSettingsDialog() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'تنظیمات',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.delete_sweep, color: Colors.red.shade400),
+                ),
+                title: const Text('پاک کردن کش'),
+                subtitle: FutureBuilder<int>(
+                  future: MediaCacheService.getCacheSize(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasData) {
+                      return Text(
+                        'حجم کش: ${MediaCacheService.formatSize(snapshot.data!)}',
+                        style: TextStyle(color: AppTheme.textGrey, fontSize: 12),
+                      );
+                    }
+                    return Text(
+                      'در حال محاسبه...',
+                      style: TextStyle(color: AppTheme.textGrey, fontSize: 12),
+                    );
+                  },
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showClearCacheDialog();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.notifications_outlined, color: Colors.blue.shade400),
+                ),
+                title: const Text('اعلان‌ها'),
+                subtitle: Text(
+                  'تنظیمات اعلان‌ها',
+                  style: TextStyle(color: AppTheme.textGrey, fontSize: 12),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  // TODO: صفحه تنظیمات اعلان
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showClearCacheDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.delete_sweep, color: Colors.red),
+              SizedBox(width: 8),
+              Text('پاک کردن کش'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('کدام کش را می‌خواهید پاک کنید؟'),
+              const SizedBox(height: 16),
+              _buildCacheOption(
+                icon: Icons.image,
+                title: 'تصاویر',
+                color: Colors.blue,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await MediaCacheService.clearCacheByType(MediaType.image);
+                  await ImageCacheService.clearDiskCache();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('کش تصاویر پاک شد'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
+              _buildCacheOption(
+                icon: Icons.videocam,
+                title: 'ویدیوها',
+                color: Colors.red,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await MediaCacheService.clearCacheByType(MediaType.video);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('کش ویدیوها پاک شد'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
+              _buildCacheOption(
+                icon: Icons.audiotrack,
+                title: 'صداها',
+                color: Colors.orange,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await MediaCacheService.clearCacheByType(MediaType.audio);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('کش صداها پاک شد'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
+              const Divider(),
+              _buildCacheOption(
+                icon: Icons.delete_forever,
+                title: 'پاک کردن همه',
+                color: Colors.red,
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await MediaCacheService.clearAllCache();
+                  await ImageCacheService.clearDiskCache();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('همه کش‌ها پاک شدند'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('انصراف'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCacheOption({
+    required IconData icon,
+    required String title,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Text(title, style: const TextStyle(fontSize: 15)),
+            const Spacer(),
+            Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.textGrey),
+          ],
+        ),
+      ),
+    );
   }
 
   void _goToLogin() async {
@@ -81,8 +313,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        body: CustomScrollView(
-          slivers: [
+        body: RefreshIndicator(
+          onRefresh: _refreshUserData,
+          color: AppTheme.primaryGreen,
+          child: CustomScrollView(
+            slivers: [
             SliverAppBar(
               expandedHeight: 240,
               floating: false,
@@ -126,19 +361,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               ),
                             ],
                           ),
-                          child: CircleAvatar(
+                          child: CachedAvatar(
+                            imageUrl: _user?['profileImage'] != null
+                                ? '${ApiService.serverUrl}${_user!['profileImage']}'
+                                : null,
                             radius: 50,
+                            name: _user?['name'] ?? _user?['phone'],
                             backgroundColor: Colors.white,
-                            backgroundImage: _user?['profileImage'] != null
-                                ? NetworkImage('http://10.0.2.2:3000${_user!['profileImage']}')
-                                : null,
-                            child: _user?['profileImage'] == null
-                                ? Icon(
-                                    Icons.person,
-                                    size: 50,
-                                    color: AppTheme.primaryGreen,
-                                  )
-                                : null,
                           ),
                         ),
                       ),
@@ -249,7 +478,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     title: 'تنظیمات',
                     subtitle: 'تنظیمات حساب کاربری',
                     color: Colors.grey,
-                    onTap: () {},
+                    onTap: () => _showSettingsDialog(),
                   ),
                   _buildMenuCard(
                     icon: Icons.info,
@@ -290,6 +519,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ],
+        ),
         ),
       ),
     );

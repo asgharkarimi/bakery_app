@@ -41,8 +41,11 @@ CREATE TABLE chats (
     message_type ENUM('text', 'image', 'video', 'voice') DEFAULT 'text',
     media_url VARCHAR(255),
     reply_to_id INT,
+    is_delivered BOOLEAN DEFAULT FALSE,
     is_read BOOLEAN DEFAULT FALSE,
     is_encrypted BOOLEAN DEFAULT FALSE,
+    is_edited BOOLEAN DEFAULT FALSE,
+    is_deleted BOOLEAN DEFAULT FALSE,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -50,6 +53,11 @@ CREATE TABLE chats (
     FOREIGN KEY (reply_to_id) REFERENCES chats(id) ON DELETE SET NULL,
     INDEX idx_chat_users (sender_id, receiver_id)
 );
+
+-- اگر جدول chats از قبل وجود داره، این دستورات رو اجرا کن:
+-- ALTER TABLE chats ADD COLUMN is_delivered BOOLEAN DEFAULT FALSE AFTER reply_to_id;
+-- ALTER TABLE chats ADD COLUMN is_edited BOOLEAN DEFAULT FALSE AFTER is_encrypted;
+-- ALTER TABLE chats ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE AFTER is_edited;
 
 -- جدول آگهی‌های استخدام
 CREATE TABLE job_ads (
@@ -63,6 +71,10 @@ CREATE TABLE job_ads (
     province VARCHAR(255),
     phone_number VARCHAR(11) NOT NULL,
     description TEXT,
+    has_insurance BOOLEAN DEFAULT FALSE COMMENT 'بیمه دارد',
+    has_accommodation BOOLEAN DEFAULT FALSE COMMENT 'محل خواب دارد',
+    has_vacation BOOLEAN DEFAULT FALSE COMMENT 'تعطیلات دارد',
+    vacation_days INT DEFAULT 0 COMMENT 'تعداد روز تعطیلی در ماه',
     images JSON DEFAULT '[]',
     is_active BOOLEAN DEFAULT TRUE,
     is_approved BOOLEAN DEFAULT FALSE,

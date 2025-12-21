@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../theme/app_theme.dart';
+import '../../services/api_service.dart';
+import '../../widgets/cached_image.dart';
 
 class ViewProfileScreen extends StatelessWidget {
   final Map<String, dynamic> user;
@@ -36,15 +38,13 @@ class ViewProfileScreen extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         const SizedBox(height: 20),
-                        CircleAvatar(
+                        CachedAvatar(
+                          imageUrl: user['profileImage'] != null
+                              ? '${ApiService.serverUrl}${user['profileImage']}'
+                              : null,
                           radius: 55,
+                          name: user['name'],
                           backgroundColor: Colors.white,
-                          backgroundImage: user['profileImage'] != null
-                              ? NetworkImage('http://10.0.2.2:3000${user['profileImage']}')
-                              : null,
-                          child: user['profileImage'] == null
-                              ? Icon(Icons.person, size: 55, color: AppTheme.primaryGreen)
-                              : null,
                         ),
                         const SizedBox(height: 16),
                         Text(

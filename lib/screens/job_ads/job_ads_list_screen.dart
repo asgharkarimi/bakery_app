@@ -19,7 +19,7 @@ class JobAdsListScreen extends StatefulWidget {
   State<JobAdsListScreen> createState() => _JobAdsListScreenState();
 }
 
-class _JobAdsListScreenState extends State<JobAdsListScreen> {
+class _JobAdsListScreenState extends State<JobAdsListScreen> with AutomaticKeepAliveClientMixin {
   final ScrollController _scrollController = ScrollController();
   final List<JobAd> _ads = [];
   
@@ -29,6 +29,9 @@ class _JobAdsListScreenState extends State<JobAdsListScreen> {
   bool _hasMore = true;
   String? _selectedProvince;
   TimeFilter? _selectedTimeFilter;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
@@ -127,6 +130,7 @@ class _JobAdsListScreenState extends State<JobAdsListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('نیازمند همکار'),
@@ -279,7 +283,7 @@ class _JobAdsListScreenState extends State<JobAdsListScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(color: Colors.grey.shade50, shape: BoxShape.circle),
-                          child: Icon(Icons.arrow_back_ios_new, size: 14, color: Colors.grey.shade400),
+                          child: Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey.shade400),
                         ),
                       ],
                     ),

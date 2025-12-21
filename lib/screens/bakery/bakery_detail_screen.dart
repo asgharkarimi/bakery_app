@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../models/bakery_ad.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/number_formatter.dart';
@@ -21,6 +22,7 @@ class BakeryDetailScreen extends StatefulWidget {
 class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
   bool _isBookmarked = false;
   bool _isOwner = false;
+  bool _isLoggedIn = false;
   int _currentImageIndex = 0;
   final PageController _pageController = PageController();
   late BakeryAd _ad;
@@ -31,6 +33,19 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
     _ad = widget.ad;
     _checkBookmark();
     _checkOwnership();
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    final loggedIn = await ApiService.isLoggedIn();
+    if (mounted) {
+      setState(() => _isLoggedIn = loggedIn);
+    }
+  }
+
+  Future<void> _refreshData() async {
+    // TODO: Add API method to get single bakery ad by ID
+    await _checkBookmark();
   }
   
   Future<void> _checkOwnership() async {
@@ -68,6 +83,28 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
     }
   }
 
+  void _shareAd() {
+    final priceText = _ad.type == 'sale'
+        ? 'قیمت فروش: ${NumberFormatter.formatPrice(_ad.salePrice ?? 0)}'
+        : 'رهن: ${NumberFormatter.formatPrice(_ad.rentDeposit ?? 0)} - اجاره: ${NumberFormatter.formatPrice(_ad.monthlyRent ?? 0)}';
+    
+    final shareText = '''
+🏪 آگهی ${_ad.type == 'sale' ? 'فروش' : 'اجاره'} نانوایی
+
+📌 ${_ad.title}
+📍 آدرس: ${_ad.location}
+💰 $priceText
+🌾 سهمیه آرد: ${_ad.flourQuota ?? '-'} کیسه
+🍞 قیمت نان: ${_ad.breadPrice ?? '-'} تومان
+📞 تماس: ${_ad.phoneNumber}
+
+${_ad.description.isNotEmpty ? '📝 توضیحات: ${_ad.description}' : ''}
+
+📱 اپلیکیشن کاریابی نانوایی
+''';
+    Share.share(shareText.trim(), subject: _ad.title);
+  }
+
   @override
   Widget build(BuildContext context) {
     final ad = _ad;
@@ -75,8 +112,11 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         backgroundColor: const Color(0xFFF5F5F5),
-        body: CustomScrollView(
-          slivers: [
+        body: RefreshIndicator(
+          onRefresh: _refreshData,
+          color: AppTheme.primaryGreen,
+          child: CustomScrollView(
+            slivers: [
             // App Bar with Image Slider
             SliverAppBar(
               expandedHeight: 280,
@@ -106,6 +146,10 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
                 IconButton(
                   icon: Icon(_isBookmarked ? Icons.bookmark : Icons.bookmark_border, color: Colors.white),
                   onPressed: _toggleBookmark,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.share, color: Colors.white),
+                  onPressed: _shareAd,
                 ),
               ],
             ),
@@ -276,15 +320,21 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
                             Expanded(
                               child: ElevatedButton.icon(
                                 onPressed: () {
+                                  if (!_isLoggedIn) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('برای مشاهده شماره تماس ابتدا وارد شوید')),
+                                    );
+                                    return;
+                                  }
                                   Clipboard.setData(ClipboardData(text: ad.phoneNumber));
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(content: const Text('شماره کپی شد'), backgroundColor: AppTheme.primaryGreen),
                                   );
                                 },
                                 icon: const Icon(Icons.phone),
-                                label: Text(ad.phoneNumber),
+                                label: Text(_isLoggedIn ? ad.phoneNumber : '***********'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.primaryGreen,
+                                  backgroundColor: _isLoggedIn ? AppTheme.primaryGreen : Colors.grey,
                                   foregroundColor: Colors.white,
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -294,6 +344,12 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
                             const SizedBox(width: 12),
                             OutlinedButton.icon(
                               onPressed: () {
+                                if (!_isLoggedIn) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('برای ارسال پیام ابتدا وارد شوید')),
+                                  );
+                                  return;
+                                }
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -323,6 +379,7 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -339,7 +396,7 @@ class _BakeryDetailScreenState extends State<BakeryDetailScreen> {
           itemBuilder: (context, index) {
             final imageUrl = ad.images[index].startsWith('http')
                 ? ad.images[index]
-                : 'http://10.0.2.2:3000${ad.images[index]}';
+                : '${ApiService.serverUrl}${ad.images[index]}';
             return GestureDetector(
               onTap: () => _showFullImage(context, imageUrl),
               child: Image.network(

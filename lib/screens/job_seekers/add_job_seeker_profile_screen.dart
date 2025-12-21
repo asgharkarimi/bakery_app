@@ -218,7 +218,7 @@ class _AddJobSeekerProfileScreenState extends State<AddJobSeekerProfileScreen> {
                       backgroundImage: _profileImage != null
                           ? FileImage(_profileImage!)
                           : _existingProfileImage != null
-                              ? NetworkImage('http://10.0.2.2:3000$_existingProfileImage')
+                              ? NetworkImage('${ApiService.serverUrl}$_existingProfileImage')
                               : null,
                       child: _profileImage == null && _existingProfileImage == null
                           ? Icon(

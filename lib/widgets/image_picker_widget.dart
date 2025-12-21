@@ -244,7 +244,7 @@ class _ImagePickerWidgetState extends State<ImagePickerWidget> {
                 children: [
                   // تصاویر موجود (آپلود شده)
                   ..._existingImages.asMap().entries.map((entry) => _buildImageItem(
-                    imageUrl: entry.value.startsWith('http') ? entry.value : 'http://10.0.2.2:3000${entry.value}',
+                    imageUrl: entry.value.startsWith('http') ? entry.value : '${ApiService.serverUrl}${entry.value}',
                     onRemove: () => _removeExistingImage(entry.key),
                     isUploaded: true,
                   )),

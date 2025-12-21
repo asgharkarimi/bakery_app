@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../models/review.dart';
 import '../../services/review_service.dart';
+import '../../services/api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/time_ago.dart';
 
@@ -149,7 +150,7 @@ class ReviewDetailScreen extends StatelessWidget {
               radius: 40,
               backgroundColor: Colors.white,
               backgroundImage: _hasProfileImage()
-                  ? NetworkImage('http://10.0.2.2:3000${review.reviewerAvatar}')
+                  ? NetworkImage('${ApiService.serverUrl}${review.reviewerAvatar}')
                   : null,
               child: !_hasProfileImage()
                   ? Text(
