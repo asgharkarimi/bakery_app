@@ -20,8 +20,8 @@ router.post('/send-code', async (req, res) => {
       user = await User.create({ phone });
     }
 
-    // تولید کد تصادفی 6 رقمی
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // کد تست: همیشه 1234
+    const code = '1234';
     user.verificationCode = code;
     user.verificationExpires = new Date(Date.now() + 5 * 60 * 1000);
     user.verificationAttempts = 0; // ریست تعداد تلاش‌ها
